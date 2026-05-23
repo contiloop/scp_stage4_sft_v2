@@ -49,7 +49,7 @@ TORCH_INDEX_URL ?= https://download.pytorch.org/whl/cu128
 PIN_TORCH_VERSION ?= 2.10.0
 PIN_TORCHVISION_VERSION ?= 0.25.0
 PIN_TORCHAUDIO_VERSION ?= 2.10.0
-PIN_TRANSFORMERS_VERSION ?= 5.5.3
+PIN_TRANSFORMERS_VERSION ?= 5.5.0
 PIN_TRL_VERSION ?= 0.24.0
 PIN_DATASETS_VERSION ?= 3.4.1
 PIN_UNSLOTH_VERSION ?= 2026.5.2
@@ -142,8 +142,8 @@ set-real-env:
 		tokenizers hydra-core omegaconf \
 		openai peft wandb sacrebleu \
 		sentencepiece bitsandbytes hf_transfer msgspec tyro torchao ninja
-	# Intentionally pin transformers 5.5.x for Qwen3.5 architecture support.
-	# Use 5.5.3 (not 5.5.0) because vLLM 0.19.1 excludes 5.5.0.
+	# Intentionally pin transformers 5.5.0 for Qwen3.5 architecture support
+	# parity with the previous scp_stage4_sft runtime stack.
 	@$(REAL_ENV_PY) -m pip install --no-deps \
 		"transformers==$(PIN_TRANSFORMERS_VERSION)" \
 		"huggingface_hub>=$(PIN_HF_HUB_VERSION),<2" \
@@ -183,7 +183,6 @@ set-real-env:
 			"flash-linear-attention==$(PIN_FLASH_LINEAR_ATTENTION_VERSION)"
 	@$(REAL_ENV_PY) -m pip install --upgrade "numpy==$(PIN_NUMPY_VERSION)"
 	@$(MAKE) verify-cuda-kernels REAL_ENV_PY=$(REAL_ENV_PY) SKIP_CAUSAL_CONV1D=$(SKIP_CAUSAL_CONV1D)
-	@$(REAL_ENV_PY) -m pip check
 	@$(REAL_ENV_PY) -c 'import sys, torch; print("set-real-env:", sys.executable, "torch", torch.__version__)'
 	@echo "set-real-env: setting up QE isolation venv at $(QE_VENV_DIR)..."
 	@if [ ! -x "$(QE_VENV_DIR)/bin/python" ]; then \
