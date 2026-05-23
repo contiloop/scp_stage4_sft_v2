@@ -64,13 +64,14 @@ PIN_SETUPTOOLS_SPEC ?= "setuptools>=77.0.3,<81.0.0"
 # - FLASH_ATTN_GPU_ARCH: auto | sm80 | sm120 | default
 # - FLASH_ATTN_WHL_SM80 / FLASH_ATTN_WHL_SM120: arch-specific wheel names
 # - FLASH_ATTN_WHL: fallback/default wheel name
-# If a wheel is unavailable, set FLASH_ATTN_SOURCE_FALLBACK=1 to compile locally.
+# If a wheel is unavailable, install fails by default (no source fallback).
+# Set FLASH_ATTN_SOURCE_FALLBACK=1 to compile locally.
 FLASH_ATTN_REPO ?= alwaysgood/scp-stage4-wheels
 FLASH_ATTN_WHL ?= flash_attn-$(PIN_FLASH_ATTN_VERSION)-$(PYTHON_TAG)-$(PYTHON_TAG)-linux_x86_64.whl
-FLASH_ATTN_WHL_SM80 ?= flash_attn-$(PIN_FLASH_ATTN_VERSION)-$(PYTHON_TAG)-$(PYTHON_TAG)-linux_x86_64-sm80.whl
-FLASH_ATTN_WHL_SM120 ?= flash_attn-$(PIN_FLASH_ATTN_VERSION)-$(PYTHON_TAG)-$(PYTHON_TAG)-linux_x86_64-sm120.whl
+FLASH_ATTN_WHL_SM80 ?= flash_attn-$(PIN_FLASH_ATTN_VERSION)-1sm80-$(PYTHON_TAG)-$(PYTHON_TAG)-linux_x86_64.whl
+FLASH_ATTN_WHL_SM120 ?= flash_attn-$(PIN_FLASH_ATTN_VERSION)-1sm120-$(PYTHON_TAG)-$(PYTHON_TAG)-linux_x86_64.whl
 FLASH_ATTN_GPU_ARCH ?= auto
-FLASH_ATTN_SOURCE_FALLBACK ?= 1
+FLASH_ATTN_SOURCE_FALLBACK ?= 0
 
 .PHONY: set set-real-env validate-config validate-jsonl validate-local test-local smoke-local \
 	validate-remote-env smoke-remote-qe smoke-remote-model smoke-remote-api dry-run-remote-subset \
