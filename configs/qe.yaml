@@ -1,0 +1,61 @@
+{
+  "qe": {
+    "runtime": {
+      "mode": "mock",
+      "subprocess": {
+        "command": null
+      }
+    },
+    "multi_gpu": {
+      "enabled": false,
+      "gpu_ids": [0, 1, 2, 3, 4, 5, 6, 7]
+    },
+    "epsilon": 1e-06,
+    "primary": {
+      "backend": "comet_kiwi",
+      "model_name": "Unbabel/wmt22-cometkiwi-da",
+      "tokenizer_name": null,
+      "batch_size": 128,
+      "max_input_length": 1536,
+      "score_direction": "higher_is_better",
+      "transform": {
+        "type": "none",
+        "max_score": 1.0,
+        "clamp_for_quality": false,
+        "preserve_raw_score": true
+      }
+    },
+    "scoring": {
+      "weighted_score": {
+        "enabled": true,
+        "alpha": 0.1,
+        "beta": 0.9
+      },
+      "collapse_term": {
+        "type": "abs_relative_delta",
+        "collapse_rate_threshold": 0.0
+      },
+      "selection": {
+        "default_rule": {
+          "top_fraction": 0.01,
+          "repetition_filter": {
+            "enabled": true,
+            "min_consecutive_token_run": 3,
+            "span_min_tokens": 2,
+            "span_max_tokens": 6,
+            "min_immediate_span_repeats": 1,
+            "min_duplicate_clauses": 1,
+            "min_severity_excess_over_source": 1
+          }
+        }
+      }
+    },
+    "isolation": {
+      "enabled": true,
+      "env": {
+        "comet_python_env": "COMET_PYTHON",
+        "metricx_python_env": "METRICX_PYTHON"
+      }
+    }
+  }
+}

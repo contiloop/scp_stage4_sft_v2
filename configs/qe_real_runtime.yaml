@@ -1,0 +1,14 @@
+{
+  "qe": {
+    "runtime": {
+      "mode": "subprocess",
+      "subprocess": {
+        "command": ["python3", "-m", "scp_stage4.pipeline.workers.qe_worker"]
+      }
+    },
+    "multi_gpu": {
+      "enabled": true,
+      "gpu_ids": [0, 1, 2, 3]
+    }
+  }
+}

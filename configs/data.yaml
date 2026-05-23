@@ -1,0 +1,88 @@
+{
+  "data": {
+    "runtime": {
+      "mode": "fixture",
+      "local_jsonl_path": null,
+      "prepare_data": {
+        "intermediate_format": "parquet",
+        "parquet_row_group_size": 4096,
+        "progress_enabled": true,
+        "progress_every_rows": 100000,
+        "progress_every_seconds": 10.0
+      },
+      "hf": {
+        "streaming": false,
+        "max_rows_per_dataset": null,
+        "dataset_download_workers": 2
+      }
+    },
+    "datasets": [
+      {
+        "name": "alwaysgood/reuter-semantic-deduped",
+        "split": "train",
+        "data_files": {"train": "deduped_shards/deduped_*.parquet"}
+      },
+      {
+        "name": "alwaysgood/c4-semantic-deduped",
+        "split": "train",
+        "data_files": {"train": "deduped_shards/deduped_*.parquet"}
+      },
+      {
+        "name": "alwaysgood/bloomberg-semantic-deduped",
+        "split": "train",
+        "data_files": {"train": "deduped_shards/deduped_*.parquet"}
+      },
+      {
+        "name": "alwaysgood/earnings-semantic-deduped",
+        "split": "train",
+        "data_files": {"train": "deduped_shards/deduped_*.parquet"}
+      },
+      {
+        "name": "alwaysgood/sec-10k-semantic-deduped",
+        "split": "train",
+        "data_files": {"train": "deduped_shards/deduped_*.parquet"}
+      }
+    ],
+    "text_columns": ["source_text", "text"],
+    "subset_size": null,
+    "split": {
+      "eval_ratio": 0.02,
+      "seed": 42
+    },
+    "sampling": {
+      "strategy": "first_n",
+      "seed": 42
+    },
+    "length": {
+      "enabled": true,
+      "mode": "tokenizer",
+      "max_total_tokens": 4096,
+      "max_source_tokens": 1700,
+      "max_output_tokens": 2048,
+      "prompt_template_tokens": 256,
+      "min_available_output_tokens": 768,
+      "safety_margin_tokens": 64,
+      "overflow": "split",
+      "output_budget_strategy": "dynamic",
+      "tokenizer_name": null,
+      "tokenizer_fallback": "error",
+      "tokenizer_local_files_only": false,
+      "tokenizer_batch_size": 16384,
+      "split": {
+        "unit": "sentence",
+        "max_source_tokens_per_chunk": 1700,
+        "max_chunks_per_row": 1024,
+        "min_chunk_tokens": 32,
+        "fallback_for_long_sentence": "skip",
+        "on_max_chunks_exceeded": "keep_first"
+      }
+    },
+    "ood_test": {
+      "enabled": true,
+      "path": "data/test.csv",
+      "source_column": "Source_En",
+      "target_column": "Target_Ko"
+    },
+    "num_workers": 4
+  }
+}

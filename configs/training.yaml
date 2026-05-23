@@ -1,0 +1,83 @@
+{
+  "training": {
+    "backend": "unsloth",
+    "runtime": {
+      "mode": "mock",
+      "subprocess": {
+        "collapse_command": null,
+        "unload_command": null,
+        "update_command": null
+      }
+    },
+    "collapse_lora": {
+      "rank": 4,
+      "learning_rate": 0.0025,
+      "num_train_epochs": 1,
+      "dropout": 0.0,
+      "bias": "none",
+      "batching": {
+        "per_device_train_batch_size": 32,
+        "gradient_accumulation_steps": 1,
+        "packing": false
+      }
+    },
+    "base_update": {
+      "mode": "full_weight",
+      "persistence": "cumulative",
+      "save_after_each_subset": true,
+      "num_train_epochs": 1,
+      "lora": {
+        "rank": 32,
+        "alpha": 64,
+        "dropout": 0.0,
+        "bias": "none",
+        "use_rslora": false,
+        "loftq_config": null,
+        "target_modules": [
+          "q_proj",
+          "k_proj",
+          "v_proj",
+          "o_proj",
+          "gate_proj",
+          "up_proj",
+          "down_proj",
+          "in_proj_a",
+          "in_proj_b",
+          "in_proj_z",
+          "in_proj_qkv",
+          "out_proj"
+        ]
+      },
+      "optimizer": {
+        "learning_rate": 3e-05,
+        "weight_decay": 0.0,
+        "warmup_ratio": 0,
+        "lr_scheduler_type": "cosine",
+        "optim": "adamw_torch",
+        "max_grad_norm": 5.0
+      },
+      "batching": {
+        "per_device_train_batch_size": 8,
+        "gradient_accumulation_steps": 4,
+        "per_device_eval_batch_size": 8,
+        "packing": false
+      },
+      "data": {
+        "use_no_change": true
+      }
+    },
+    "checkpoint": {
+      "save_after_each_subset": true,
+      "save_latest_pointer": true,
+      "keep_subset_checkpoints": true,
+      "keep_last_n": 1,
+      "keep_best_n": 1,
+      "metric_for_best": "ood/xcomet_mean",
+      "greater_is_better": true,
+      "keep_final": true,
+      "save_optimizer_state": true,
+      "save_collapse_lora": false,
+      "upload_to_wandb": false
+    }
+  }
+}

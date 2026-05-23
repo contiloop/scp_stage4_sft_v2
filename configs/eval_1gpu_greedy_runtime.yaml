@@ -1,0 +1,64 @@
+{
+  "inference": {
+    "runtime": {
+      "multi_gpu": {
+        "enabled": false,
+        "gpu_ids": [0],
+        "shard_strategy": "order_split"
+      }
+    },
+    "eval": {
+      "do_sample": false,
+      "temperature": 0.0,
+      "top_p": null,
+      "max_new_tokens": 2048,
+      "on_truncation": "discard"
+    }
+  },
+  "qe": {
+    "multi_gpu": {
+      "enabled": false,
+      "gpu_ids": [0]
+    }
+  },
+  "model": {
+    "tensor_parallel_size": 1
+  },
+  "training": {
+    "runtime": {
+      "subprocess": {
+        "collapse_command": [
+          "torchrun",
+          "--nproc_per_node=1",
+          "-m",
+          "scp_stage4.pipeline.workers.training_worker"
+        ],
+        "unload_command": [
+          "torchrun",
+          "--nproc_per_node=1",
+          "-m",
+          "scp_stage4.pipeline.workers.training_worker"
+        ],
+        "update_command": [
+          "torchrun",
+          "--nproc_per_node=1",
+          "-m",
+          "scp_stage4.pipeline.workers.training_worker"
+        ]
+      }
+    },
+    "base_update": {
+      "batching": {
+        "per_device_train_batch_size": 4,
+        "gradient_accumulation_steps": 32
+      }
+    },
+    "checkpoint": {
+      "keep_last_n": 1,
+      "keep_best_n": 0
+    }
+  },
+  "run": {
+    "run_id": "greedy_reeval_main_001"
+  }
+}

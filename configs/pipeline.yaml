@@ -1,0 +1,43 @@
+{
+  "pipeline": {
+    "subset": {
+      "strategy": "fraction",
+      "fraction": 0.02,
+      "min_size": 32,
+      "max_size": null,
+      "shuffle": true,
+      "seed": 42,
+      "drop_last": false
+    },
+    "stage": {
+      "max_subsets": null,
+      "use_sampled_data": false,
+      "subset_archive": {
+        "enabled": false,
+        "format": "tar.gz",
+        "output_dir": "archives/subsets",
+        "delete_original_after_archive": false
+      }
+    },
+    "execution": {
+      "allow_microbatch_overlap": true,
+      "allow_next_subset_q1_prefetch": true,
+      "api_concurrency_overlaps_gpu_work": true
+    },
+    "eval_after_subset": {
+      "enabled": true,
+      "dataset": "ood_test",
+      "every_n_subsets": 1,
+      "run_on_final_subset": true,
+      "runtime": "qe_subprocess",
+      "source_column": "Source_En",
+      "reference_column": "Target_Ko",
+      "metrics": ["xcomet", "BLEU", "chrF"],
+      "metric_settings": {
+        "xcomet": {
+          "model_name": "Unbabel/wmt22-comet-da"
+        }
+      }
+    }
+  }
+}

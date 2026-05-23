@@ -1,0 +1,49 @@
+{
+  "inference": {
+    "runtime": {
+      "mode": "mock",
+      "unsloth": {
+        "enabled": true,
+        "fallback_to_transformers": false
+      },
+      "multi_gpu": {
+        "enabled": false,
+        "gpu_ids": [0, 1],
+        "shard_strategy": "order_split"
+      },
+      "subprocess": {
+        "command": null
+      }
+    },
+    "q1": {
+      "do_sample": true,
+      "temperature": 1.1,
+      "top_p": 0.95,
+      "max_new_tokens": 2048,
+      "on_truncation": "discard"
+    },
+    "q2": {
+      "do_sample": false,
+      "temperature": 0.0,
+      "top_p": null,
+      "max_new_tokens": 2048,
+      "on_truncation": "discard"
+    },
+    "eval": {
+      "do_sample": false,
+      "temperature": 0.0,
+      "top_p": null,
+      "max_new_tokens": 2048,
+      "on_truncation": "discard"
+    },
+    "throughput": {
+      "batching": {
+        "strategy": "token_budget",
+        "max_batch_tokens": 65536,
+        "pad_to_multiple_of": 8
+      },
+      "preserve_order": false,
+      "restore_order_in_artifacts": true
+    }
+  }
+}
