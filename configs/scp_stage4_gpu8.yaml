@@ -109,8 +109,8 @@ inference:
     subprocess:
       command: null
   q1:
-    do_sample: true
-    temperature: 1.1
+    do_sample: false
+    temperature: 0.0
     top_p: 0.95
     max_new_tokens: 2048
     on_truncation: discard
