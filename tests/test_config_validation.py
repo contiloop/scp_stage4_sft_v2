@@ -229,20 +229,16 @@ class ConfigValidationTests(unittest.TestCase):
             validate_config(cfg)
 
         cfg = compose_config("configs/scp_stage4.yaml")
-        cfg["qe"]["scoring"]["selection"]["default_rule"]["repetition_filter"]["span_min_tokens"] = 4
-        cfg["qe"]["scoring"]["selection"]["default_rule"]["repetition_filter"]["span_max_tokens"] = 2
+        cfg["qe"]["scoring"]["selection"]["default_rule"]["repetition_filter"]["char_rep_max_unit"] = 0
         with self.assertRaises(ConfigValidationError):
             validate_config(cfg)
 
         cfg = compose_config("configs/scp_stage4.yaml")
         rep = cfg["qe"]["scoring"]["selection"]["default_rule"]["repetition_filter"]
         rep["enabled"] = False
-        rep["min_consecutive_token_run"] = 4
-        rep["span_min_tokens"] = 2
-        rep["span_max_tokens"] = 5
-        rep["min_immediate_span_repeats"] = 1
-        rep["min_duplicate_clauses"] = 1
-        rep["min_severity_excess_over_source"] = 2
+        rep["char_rep_max_unit"] = 8
+        rep["min_mt_char_rep"] = 6
+        rep["min_excess_over_source"] = 2
         validate_config(cfg)
 
 

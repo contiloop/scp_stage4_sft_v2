@@ -490,14 +490,10 @@ def validate_config(cfg: dict[str, Any]) -> None:
         _err(errors, "qe.scoring.selection.default_rule.repetition_filter.enabled must be a boolean")
 
     int_constraints = {
-        "min_consecutive_token_run": 2,
-        "span_min_tokens": 1,
-        "span_max_tokens": 1,
-        "min_immediate_span_repeats": 1,
-        "min_duplicate_clauses": 1,
-        "min_severity_excess_over_source": 0,
+        "char_rep_max_unit": 1,
+        "min_mt_char_rep": 2,
+        "min_excess_over_source": 0,
     }
-    validated_ints: dict[str, int] = {}
     for key, lower_bound in int_constraints.items():
         value = repetition_filter.get(key)
         if value is None:
@@ -507,18 +503,6 @@ def validate_config(cfg: dict[str, Any]) -> None:
                 errors,
                 f"qe.scoring.selection.default_rule.repetition_filter.{key} must be an integer >= {lower_bound}",
             )
-            continue
-        validated_ints[key] = int(value)
-
-    if (
-        "span_min_tokens" in validated_ints
-        and "span_max_tokens" in validated_ints
-        and validated_ints["span_max_tokens"] < validated_ints["span_min_tokens"]
-    ):
-        _err(
-            errors,
-            "qe.scoring.selection.default_rule.repetition_filter.span_max_tokens must be >= span_min_tokens",
-        )
 
     subset_cfg = _as_dict(pipeline.get("subset", {}), "pipeline.subset", errors)
     strategy = subset_cfg.get("strategy")

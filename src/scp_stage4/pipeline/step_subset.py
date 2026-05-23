@@ -10,7 +10,6 @@ import logging
 import math
 import os
 import random
-import re
 import shutil
 import subprocess
 import sys
@@ -2011,90 +2010,37 @@ def _select_fragile(scored_rows: Sequence[Mapping[str, Any]], cfg: Mapping[str, 
     if not isinstance(repetition_cfg, Mapping):
         repetition_cfg = {}
     repetition_enabled = bool(repetition_cfg.get("enabled", True))
-    min_consecutive_token_run = int(repetition_cfg.get("min_consecutive_token_run", 3))
-    span_min_tokens = int(repetition_cfg.get("span_min_tokens", 2))
-    span_max_tokens = int(repetition_cfg.get("span_max_tokens", 6))
-    min_immediate_span_repeats = int(repetition_cfg.get("min_immediate_span_repeats", 1))
-    min_duplicate_clauses = int(repetition_cfg.get("min_duplicate_clauses", 1))
-    min_severity_excess_over_source = int(
-        repetition_cfg.get("min_severity_excess_over_source", 1)
-    )
+    char_rep_max_unit = int(repetition_cfg.get("char_rep_max_unit", 8))
+    min_mt_char_rep = int(repetition_cfg.get("min_mt_char_rep", 6))
+    min_excess_over_source = int(repetition_cfg.get("min_excess_over_source", 1))
 
-    def _tokenize(text: str) -> list[str]:
-        return [token for token in re.findall(r"\S+", text.lower()) if token]
-
-    def _max_consecutive_token_run(tokens: Sequence[str]) -> int:
-        if not tokens:
-            return 0
-        max_run = 1
-        run = 1
-        for idx in range(1, len(tokens)):
-            if tokens[idx] == tokens[idx - 1]:
-                run += 1
-            else:
-                run = 1
-            if run > max_run:
-                max_run = run
-        return max_run
-
-    def _count_immediate_span_repeats(tokens: Sequence[str]) -> int:
-        count = 0
-        n_tokens = len(tokens)
-        if n_tokens < span_min_tokens * 2:
-            return 0
-        for span in range(span_min_tokens, min(span_max_tokens, n_tokens // 2) + 1):
+    def _char_rep(text: str, *, max_unit: int) -> int:
+        s = text or ""
+        best = 1
+        n_chars = len(s)
+        for unit_len in range(1, max_unit + 1):
             idx = 0
-            while idx + 2 * span <= n_tokens:
-                if list(tokens[idx : idx + span]) != list(tokens[idx + span : idx + (2 * span)]):
+            while idx + unit_len <= n_chars:
+                unit = s[idx : idx + unit_len]
+                if not unit.strip():
                     idx += 1
                     continue
-                while idx + 2 * span <= n_tokens and list(tokens[idx : idx + span]) == list(
-                    tokens[idx + span : idx + (2 * span)]
-                ):
-                    count += 1
-                    idx += span
-        return count
-
-    def _count_duplicate_clauses(text: str) -> int:
-        chunks = re.split(r"[,:;.!?]+", text.lower())
-        seen: dict[str, int] = {}
-        duplicates = 0
-        for chunk in chunks:
-            normalized = " ".join(chunk.split())
-            if not normalized:
-                continue
-            previous = seen.get(normalized, 0)
-            if previous > 0:
-                duplicates += 1
-            seen[normalized] = previous + 1
-        return duplicates
-
-    def _repetition_signature(text: str) -> tuple[bool, int]:
-        tokens = _tokenize(text)
-        max_run = _max_consecutive_token_run(tokens)
-        immediate_span_repeats = _count_immediate_span_repeats(tokens)
-        duplicate_clauses = _count_duplicate_clauses(text)
-
-        has_repetition = (
-            max_run >= min_consecutive_token_run
-            or immediate_span_repeats >= min_immediate_span_repeats
-            or duplicate_clauses >= min_duplicate_clauses
-        )
-        severity = (
-            max(max_run - 2, 0)
-            + immediate_span_repeats
-            + duplicate_clauses
-        )
-        return has_repetition, severity
+                run = 1
+                cursor = idx + unit_len
+                while cursor + unit_len <= n_chars and s[cursor : cursor + unit_len] == unit:
+                    run += 1
+                    cursor += unit_len
+                if run > best:
+                    best = run
+                idx = cursor if run > 1 else idx + 1
+        return best
 
     def _is_abnormal_repetition(*, source: str, mt_q1: str) -> bool:
-        mt_flag, mt_severity = _repetition_signature(mt_q1)
-        if not mt_flag:
+        mt_char_rep = _char_rep(mt_q1, max_unit=char_rep_max_unit)
+        if mt_char_rep < min_mt_char_rep:
             return False
-        src_flag, src_severity = _repetition_signature(source)
-        if not src_flag:
-            return True
-        return mt_severity >= (src_severity + min_severity_excess_over_source)
+        src_char_rep = _char_rep(source, max_unit=char_rep_max_unit)
+        return mt_char_rep >= (src_char_rep + min_excess_over_source)
 
     if repetition_enabled:
         eligible_rows = [

@@ -40,12 +40,9 @@
           "top_fraction": 0.01,
           "repetition_filter": {
             "enabled": true,
-            "min_consecutive_token_run": 3,
-            "span_min_tokens": 2,
-            "span_max_tokens": 6,
-            "min_immediate_span_repeats": 1,
-            "min_duplicate_clauses": 1,
-            "min_severity_excess_over_source": 1
+            "char_rep_max_unit": 8,
+            "min_mt_char_rep": 6,
+            "min_excess_over_source": 1
           }
         }
       }
