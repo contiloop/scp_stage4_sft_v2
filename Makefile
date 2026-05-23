@@ -60,11 +60,16 @@ PIN_HF_XET_VERSION ?= 1.5.0
 PIN_FLASH_ATTN_VERSION ?= 2.8.3
 PIN_SETUPTOOLS_SPEC ?= "setuptools>=77.0.3,<81.0.0"
 
-# FlashAttention2 wheel hosted in a HF dataset. Override FLASH_ATTN_REPO/WHL
-# for a prebuilt wheel that matches Python, torch/CUDA, and GPU arch.
-# If the wheel is absent, set FLASH_ATTN_SOURCE_FALLBACK=1 to compile locally.
+# FlashAttention2 wheel hosted in a HF dataset.
+# - FLASH_ATTN_GPU_ARCH: auto | sm80 | sm120 | default
+# - FLASH_ATTN_WHL_SM80 / FLASH_ATTN_WHL_SM120: arch-specific wheel names
+# - FLASH_ATTN_WHL: fallback/default wheel name
+# If a wheel is unavailable, set FLASH_ATTN_SOURCE_FALLBACK=1 to compile locally.
 FLASH_ATTN_REPO ?= alwaysgood/scp-stage4-wheels
 FLASH_ATTN_WHL ?= flash_attn-$(PIN_FLASH_ATTN_VERSION)-$(PYTHON_TAG)-$(PYTHON_TAG)-linux_x86_64.whl
+FLASH_ATTN_WHL_SM80 ?= flash_attn-$(PIN_FLASH_ATTN_VERSION)-$(PYTHON_TAG)-$(PYTHON_TAG)-linux_x86_64-sm80.whl
+FLASH_ATTN_WHL_SM120 ?= flash_attn-$(PIN_FLASH_ATTN_VERSION)-$(PYTHON_TAG)-$(PYTHON_TAG)-linux_x86_64-sm120.whl
+FLASH_ATTN_GPU_ARCH ?= auto
 FLASH_ATTN_SOURCE_FALLBACK ?= 1
 
 .PHONY: set set-real-env validate-config validate-jsonl validate-local test-local smoke-local \
@@ -72,6 +77,9 @@ FLASH_ATTN_SOURCE_FALLBACK ?= 1
 	validate-real-config run-subset-real run-stage-real run-subset-real-from-prepared run-stage-real-from-prepared \
 	prepare-data run-subset run-stage eval eval-ood reeval-greedy-checkpoints replay-saved-updates translate-checkpoint data-source-ratio \
 	infer-q1 score call-api update-base \
+	run-subset-gpu1 run-subset-gpu2 run-subset-gpu4 run-subset-gpu8 \
+	run-stage-gpu1 run-stage-gpu2 run-stage-gpu4 run-stage-gpu8 \
+	eval-ood-gpu1 eval-ood-gpu2 eval-ood-gpu4 eval-ood-gpu8 \
 	pack-prepared-data upload-prepared-data download-prepared-data verify-cuda-kernels
 
 # Target: set
@@ -137,15 +145,30 @@ set-real-env:
 		"transformers==$(PIN_TRANSFORMERS_VERSION)" \
 		"huggingface_hub>=$(PIN_HF_HUB_VERSION),<1" \
 		"hf-xet>=$(PIN_HF_XET_VERSION),<2"
-	# FlashAttention2: prefer a matching prebuilt wheel; compile from source if absent.
-	@if $(REAL_ENV_PY) -m pip install \
-		"https://huggingface.co/datasets/$(FLASH_ATTN_REPO)/resolve/main/$(FLASH_ATTN_WHL)"; then \
-		echo "  flash_attn wheel install ok: $(FLASH_ATTN_WHL)"; \
+	# FlashAttention2: choose wheel by GPU arch (sm80/sm120) when possible.
+	@arch_choice="$(FLASH_ATTN_GPU_ARCH)"; \
+	selected_whl="$(FLASH_ATTN_WHL)"; \
+	py_tag="$(PYTHON_TAG)"; \
+	py_ver="$$( $(REAL_ENV_PY) -c 'import sys; print(f\"{sys.version_info.major}.{sys.version_info.minor}\")' )"; \
+	if [ "$$arch_choice" = "auto" ]; then \
+		detected="$$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | awk -F'.' 'BEGIN{max=0} {gsub(/[^0-9.]/,\"\"); if ($$1 ~ /^[0-9]+$$/) {minor=$$2; if (minor !~ /^[0-9]+$$/) minor=0; val=($$1*10)+minor; if (val>max) max=val;}} END{if (max>0) printf \"sm%d\", max;}')"; \
+		if [ -n "$$detected" ]; then arch_choice="$$detected"; else arch_choice="default"; fi; \
+	fi; \
+	case "$$arch_choice" in \
+		sm80) selected_whl="$(FLASH_ATTN_WHL_SM80)" ;; \
+		sm120) selected_whl="$(FLASH_ATTN_WHL_SM120)" ;; \
+		default|'') selected_whl="$(FLASH_ATTN_WHL)" ;; \
+		*) echo "  [WARN] unknown FLASH_ATTN_GPU_ARCH=$$arch_choice, using default wheel"; selected_whl="$(FLASH_ATTN_WHL)" ;; \
+	esac; \
+	echo "  flash_attn target: python=$$py_ver ($$py_tag) arch=$$arch_choice wheel=$$selected_whl"; \
+	if $(REAL_ENV_PY) -m pip install \
+		"https://huggingface.co/datasets/$(FLASH_ATTN_REPO)/resolve/main/$$selected_whl"; then \
+		echo "  flash_attn wheel install ok: $$selected_whl"; \
 	elif [ "$(FLASH_ATTN_SOURCE_FALLBACK)" = "1" ]; then \
 		echo "  flash_attn wheel unavailable, building flash-attn==$(PIN_FLASH_ATTN_VERSION) from source"; \
 		FLASH_ATTENTION_FORCE_BUILD=TRUE $(REAL_ENV_PY) -m pip install --no-build-isolation "flash-attn==$(PIN_FLASH_ATTN_VERSION)"; \
 	else \
-		echo "  [ERROR] flash_attn wheel unavailable: $(FLASH_ATTN_WHL)"; \
+		echo "  [ERROR] flash_attn wheel unavailable: $$selected_whl"; \
 		exit 1; \
 	fi
 	@if [ "$(SKIP_CAUSAL_CONV1D)" = "1" ]; then \
@@ -299,6 +322,34 @@ run-subset: prepare-data
 # exit behavior: 0 when every scheduled subset completes; non-zero on any contract failure
 run-stage: prepare-data
 	@PYTHONPATH=$(PYTHONPATH) $(PY) -m scp_stage4.pipeline.step_subset run-stage --config $(CONFIG) --run-id $(RUN_ID) $(OVERRIDES)
+
+# GPU profile convenience wrappers (no OVERRIDES needed for GPU counts)
+run-subset-gpu1: prepare-data
+	@PYTHONPATH=$(PYTHONPATH) $(PY) -m scp_stage4.pipeline.step_subset run-subset --config configs/scp_stage4_gpu1.yaml --run-id $(RUN_ID) --subset-idx 0 --use-prepared-data $(OVERRIDES)
+run-subset-gpu2: prepare-data
+	@PYTHONPATH=$(PYTHONPATH) $(PY) -m scp_stage4.pipeline.step_subset run-subset --config configs/scp_stage4_gpu2.yaml --run-id $(RUN_ID) --subset-idx 0 --use-prepared-data $(OVERRIDES)
+run-subset-gpu4: prepare-data
+	@PYTHONPATH=$(PYTHONPATH) $(PY) -m scp_stage4.pipeline.step_subset run-subset --config configs/scp_stage4_gpu4.yaml --run-id $(RUN_ID) --subset-idx 0 --use-prepared-data $(OVERRIDES)
+run-subset-gpu8: prepare-data
+	@PYTHONPATH=$(PYTHONPATH) $(PY) -m scp_stage4.pipeline.step_subset run-subset --config configs/scp_stage4_gpu8.yaml --run-id $(RUN_ID) --subset-idx 0 --use-prepared-data $(OVERRIDES)
+
+run-stage-gpu1: prepare-data
+	@PYTHONPATH=$(PYTHONPATH) $(PY) -m scp_stage4.pipeline.step_subset run-stage --config configs/scp_stage4_gpu1.yaml --run-id $(RUN_ID) $(OVERRIDES)
+run-stage-gpu2: prepare-data
+	@PYTHONPATH=$(PYTHONPATH) $(PY) -m scp_stage4.pipeline.step_subset run-stage --config configs/scp_stage4_gpu2.yaml --run-id $(RUN_ID) $(OVERRIDES)
+run-stage-gpu4: prepare-data
+	@PYTHONPATH=$(PYTHONPATH) $(PY) -m scp_stage4.pipeline.step_subset run-stage --config configs/scp_stage4_gpu4.yaml --run-id $(RUN_ID) $(OVERRIDES)
+run-stage-gpu8: prepare-data
+	@PYTHONPATH=$(PYTHONPATH) $(PY) -m scp_stage4.pipeline.step_subset run-stage --config configs/scp_stage4_gpu8.yaml --run-id $(RUN_ID) $(OVERRIDES)
+
+eval-ood-gpu1: prepare-data
+	@PYTHONPATH=$(PYTHONPATH) $(PY) -m scp_stage4.pipeline.step_subset eval-ood --config configs/scp_stage4_gpu1.yaml --run-id $(RUN_ID) --subset-idx 0 $(OVERRIDES)
+eval-ood-gpu2: prepare-data
+	@PYTHONPATH=$(PYTHONPATH) $(PY) -m scp_stage4.pipeline.step_subset eval-ood --config configs/scp_stage4_gpu2.yaml --run-id $(RUN_ID) --subset-idx 0 $(OVERRIDES)
+eval-ood-gpu4: prepare-data
+	@PYTHONPATH=$(PYTHONPATH) $(PY) -m scp_stage4.pipeline.step_subset eval-ood --config configs/scp_stage4_gpu4.yaml --run-id $(RUN_ID) --subset-idx 0 $(OVERRIDES)
+eval-ood-gpu8: prepare-data
+	@PYTHONPATH=$(PYTHONPATH) $(PY) -m scp_stage4.pipeline.step_subset eval-ood --config configs/scp_stage4_gpu8.yaml --run-id $(RUN_ID) --subset-idx 0 $(OVERRIDES)
 
 # Target: eval
 # required config keys: pipeline.eval_after_subset.*, logging.*

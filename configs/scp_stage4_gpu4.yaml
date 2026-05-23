@@ -1,0 +1,435 @@
+defaults: []
+model:
+  name: alwaysgood/qwen35-it
+  load_in_4bit: false
+  max_length: 4096
+  max_seq_length: 4096
+  dtype: bf16
+  attention_impl: flash_attention_2
+  padding_side: left
+  eos_token: null
+  chat_template: null
+  trust_remote_code: false
+data:
+  runtime:
+    mode: fixture
+    local_jsonl_path: null
+    prepare_data:
+      intermediate_format: parquet
+      parquet_row_group_size: 4096
+      progress_enabled: true
+      progress_every_rows: 100000
+      progress_every_seconds: 10.0
+    hf:
+      streaming: false
+      max_rows_per_dataset: null
+      dataset_download_workers: 2
+  datasets:
+    -
+      name: alwaysgood/reuter-semantic-deduped
+      split: train
+      data_files:
+        train: "deduped_shards/deduped_*.parquet"
+    -
+      name: alwaysgood/c4-semantic-deduped
+      split: train
+      data_files:
+        train: "deduped_shards/deduped_*.parquet"
+    -
+      name: alwaysgood/bloomberg-semantic-deduped
+      split: train
+      data_files:
+        train: "deduped_shards/deduped_*.parquet"
+    -
+      name: alwaysgood/earnings-semantic-deduped
+      split: train
+      data_files:
+        train: "deduped_shards/deduped_*.parquet"
+    -
+      name: alwaysgood/sec-10k-semantic-deduped
+      split: train
+      data_files:
+        train: "deduped_shards/deduped_*.parquet"
+  text_columns:
+    - source_text
+    - text
+  subset_size: null
+  split:
+    eval_ratio: 0.02
+    seed: 42
+  sampling:
+    strategy: first_n
+    seed: 42
+  length:
+    enabled: true
+    mode: tokenizer
+    max_total_tokens: 4096
+    max_source_tokens: 1700
+    max_output_tokens: 2048
+    prompt_template_tokens: 256
+    min_available_output_tokens: 768
+    safety_margin_tokens: 64
+    overflow: split
+    output_budget_strategy: dynamic
+    tokenizer_name: null
+    tokenizer_fallback: error
+    tokenizer_local_files_only: false
+    tokenizer_batch_size: 16384
+    split:
+      unit: sentence
+      max_source_tokens_per_chunk: 1700
+      max_chunks_per_row: 1024
+      min_chunk_tokens: 32
+      fallback_for_long_sentence: skip
+      on_max_chunks_exceeded: keep_first
+  ood_test:
+    enabled: true
+    path: data/test.csv
+    source_column: Source_En
+    target_column: Target_Ko
+  num_workers: 4
+inference:
+  runtime:
+    mode: mock
+    unsloth:
+      enabled: true
+      fallback_to_transformers: false
+    multi_gpu:
+      enabled: true
+      gpu_ids:
+        - 0
+        - 1
+        - 2
+        - 3
+      shard_strategy: order_split
+    subprocess:
+      command: null
+  q1:
+    do_sample: true
+    temperature: 1.1
+    top_p: 0.95
+    max_new_tokens: 2048
+    on_truncation: discard
+  q2:
+    do_sample: false
+    temperature: 0.0
+    top_p: null
+    max_new_tokens: 2048
+    on_truncation: discard
+  eval:
+    do_sample: false
+    temperature: 0.0
+    top_p: null
+    max_new_tokens: 2048
+    on_truncation: discard
+  throughput:
+    batching:
+      strategy: token_budget
+      max_batch_tokens: 65536
+      pad_to_multiple_of: 8
+    preserve_order: false
+    restore_order_in_artifacts: true
+pipeline:
+  subset:
+    strategy: fraction
+    fraction: 0.02
+    min_size: 32
+    max_size: null
+    shuffle: true
+    seed: 42
+    drop_last: false
+  stage:
+    max_subsets: null
+    use_sampled_data: false
+    subset_archive:
+      enabled: false
+      format: tar.gz
+      output_dir: archives/subsets
+      delete_original_after_archive: false
+  execution:
+    allow_microbatch_overlap: true
+    allow_next_subset_q1_prefetch: true
+    api_concurrency_overlaps_gpu_work: true
+  eval_after_subset:
+    enabled: true
+    dataset: ood_test
+    every_n_subsets: 1
+    run_on_final_subset: true
+    runtime: qe_subprocess
+    source_column: Source_En
+    reference_column: Target_Ko
+    metrics:
+      - xcomet
+      - BLEU
+      - chrF
+    metric_settings:
+      xcomet:
+        model_name: Unbabel/wmt22-comet-da
+training:
+  backend: unsloth
+  runtime:
+    mode: mock
+    subprocess:
+      collapse_command: null
+      unload_command: null
+      update_command: null
+  collapse_lora:
+    rank: 4
+    learning_rate: 0.0025
+    num_train_epochs: 1
+    dropout: 0.0
+    bias: none
+    batching:
+      per_device_train_batch_size: 32
+      gradient_accumulation_steps: 1
+      packing: false
+  base_update:
+    mode: full_weight
+    persistence: cumulative
+    save_after_each_subset: true
+    num_train_epochs: 1
+    lora:
+      rank: 32
+      alpha: 64
+      dropout: 0.0
+      bias: none
+      use_rslora: false
+      loftq_config: null
+      target_modules:
+        - q_proj
+        - k_proj
+        - v_proj
+        - o_proj
+        - gate_proj
+        - up_proj
+        - down_proj
+        - in_proj_a
+        - in_proj_b
+        - in_proj_z
+        - in_proj_qkv
+        - out_proj
+    optimizer:
+      learning_rate: 3e-05
+      weight_decay: 0.0
+      warmup_ratio: 0
+      lr_scheduler_type: cosine
+      optim: adamw_torch
+      max_grad_norm: 5.0
+    batching:
+      per_device_train_batch_size: 8
+      gradient_accumulation_steps: 4
+      per_device_eval_batch_size: 8
+      packing: false
+    data:
+      use_no_change: true
+  checkpoint:
+    save_after_each_subset: true
+    save_latest_pointer: true
+    keep_subset_checkpoints: true
+    keep_last_n: 1
+    keep_best_n: 1
+    metric_for_best: ood/xcomet_mean
+    greater_is_better: true
+    keep_final: true
+    save_optimizer_state: true
+    save_collapse_lora: false
+    upload_to_wandb: false
+qe:
+  runtime:
+    mode: mock
+    subprocess:
+      command: null
+  multi_gpu:
+    enabled: true
+    gpu_ids:
+      - 0
+      - 1
+      - 2
+      - 3
+  epsilon: 1e-06
+  primary:
+    backend: comet_kiwi
+    model_name: Unbabel/wmt22-cometkiwi-da
+    tokenizer_name: null
+    batch_size: 128
+    max_input_length: 1536
+    score_direction: higher_is_better
+    transform:
+      type: none
+      max_score: 1.0
+      clamp_for_quality: false
+      preserve_raw_score: true
+  scoring:
+    weighted_score:
+      enabled: true
+      alpha: 0.1
+      beta: 0.9
+    collapse_term:
+      type: abs_relative_delta
+      collapse_rate_threshold: 0.0
+    selection:
+      default_rule:
+        top_fraction: 0.01
+        repetition_filter:
+          enabled: true
+          char_rep_max_unit: 8
+          min_mt_char_rep: 6
+          min_excess_over_source: 1
+  isolation:
+    enabled: true
+    env:
+      comet_python_env: COMET_PYTHON
+      metricx_python_env: METRICX_PYTHON
+external_api:
+  runtime:
+    mode: mock
+    subprocess:
+      command: null
+  routing:
+    mode: weighted
+    seed: 42
+    fallback_enabled: false
+    ensemble_enabled: false
+    splits:
+      -
+        name: gemini-3.1-flash-lite-off
+        provider: gemini
+        model: gemini-3.1-flash-lite
+        params:
+          thinking_mode: off
+        weight: 0.7
+      -
+        name: gemini-3.1-flash-lite-dynamic
+        provider: gemini
+        model: gemini-3.1-flash-lite
+        params:
+          thinking_mode: dynamic
+          thinking_budget: -1
+        weight: 0.1
+      -
+        name: gpt-5.5-thinking
+        provider: openai
+        model: gpt-5.5
+        params:
+          reasoning_effort: medium
+          text_verbosity: low
+        weight: 0.1
+      -
+        name: opus-4.7-adaptive
+        provider: anthropic
+        model: claude-opus-4-7
+        params:
+          thinking_mode: adaptive
+          adaptive_effort: medium
+          thinking_display: summarized
+        weight: 0.1
+  concurrency:
+    max_workers: 18
+    per_provider:
+      openai: 4
+      anthropic: 4
+      gemini: 12
+    min_request_interval_sec: 0.0
+  primary:
+    provider: openai
+    model: gpt-5.4
+    api_key_env: OPENAI_API_KEY
+  providers:
+    openai:
+      enabled: true
+      api_key_env: OPENAI_API_KEY
+    anthropic:
+      enabled: true
+      api_key_env: ANTHROPIC_API_KEY
+    gemini:
+      enabled: true
+      api_key_env: GEMINI_API_KEY
+    claude:
+      enabled: false
+      api_key_env: ANTHROPIC_API_KEY
+    qwen:
+      enabled: false
+      api_key_env: QWEN_API_KEY
+    deepseek:
+      enabled: false
+      api_key_env: DEEPSEEK_API_KEY
+  failure:
+    retry: 3
+    on_error: skip
+    max_failure_rate: 0.2
+    on_failure_rate_exceeded: fail
+  output_status:
+    allowed:
+      - ok
+      - skipped
+      - failed
+      - filtered
+      - needs_review
+  timeouts:
+    openai_sec: 120
+    anthropic_sec: 180
+    gemini_sec: 120
+logging:
+  report_to:
+    - wandb
+  run_name: null
+  required_event_fields:
+    - run_id
+    - subset_idx
+    - phase
+    - config_hash
+  local:
+    enabled: true
+    root_dir: artifacts/runs
+    write_effective_config: true
+    write_config_hash: true
+    events_jsonl: events.jsonl
+    metrics_jsonl: metrics.jsonl
+    failures_jsonl: failures.jsonl
+  wandb:
+    enabled: true
+    project: scp_stage4_sft_v2
+    entity: null
+    tags:
+      - scp
+      - stage4
+      - sft
+      - en-ko
+    notes: ''
+    log_artifacts: true
+    log_model_checkpoints: false
+prompts:
+  translation:
+    version: translation_v1
+    src_lang_name: English
+    src_locale: en-US
+    tgt_lang_name: Korean
+    tgt_locale: ko-KR
+    template_seed: 42
+    selection_seed_scope: row_id
+    templates:
+      - "You are a professional {src_lang_name} ({src_locale}) to {tgt_lang_name} ({tgt_locale}) translator. Your goal is to accurately convey the meaning and nuances of the original {src_lang_name} text while adhering to {tgt_lang_name} grammar, vocabulary, and cultural sensitivities. Produce only the {tgt_lang_name} translation, without any additional explanations or commentary. Please translate the following {src_lang_name} text into {tgt_lang_name}: {src}"
+      - "Translate the following text from {src_lang_name} to {tgt_lang_name}: {src}"
+      - "What does this sentence mean in {tgt_lang_name} from {src_lang_name}: {src}"
+      - "How do you translate this sentence into {tgt_lang_name} from {src_lang_name}: {src}"
+      - "Translate the following text to {tgt_lang_name}: {src}"
+  sft:
+    version: sft_translation_v1
+    instruction_template: "### Instruction:\nTranslate the English source into Korean.\n\n### Source:\n{source}\n\n"
+    response_template: "### Response:\n"
+  teacher_correction:
+    version: teacher_correction_v1
+    system_template: You are a professional English-to-Korean translator. Your primary specialization is finance, economics, and market commentary, but you also handle general business, technology, science, and news content with publication-grade Korean.
+    user_template: "Given SOURCE and DRAFT, produce the best final Korean translation.\n\nBefore translating, silently consider:\n- Is this finance/market content, or general business/tech/news/scientific text? Adjust register accordingly.\n- If finance: what kind of source? (sell-side analyst note, earnings call, news article, regulatory filing, IR statement, macro commentary)\n- Who likely wrote it and for whom? (equity analyst to institutional clients, journalist to general financial readers, corporate IR to shareholders, etc.)\n- What is the dominant register and sub-domain when applicable?\n    - Asset class: equities / fixed income / macro / FX / commodities / M&A / earnings\n    - Industry sector (for equity-related text): semiconductors, IT/software, biotech/pharma, steel/materials, automotive, energy, finance/banks, consumer, real estate, etc.\n- If the text is clearly NOT finance (e.g., general tech tutorial, scientific abstract, lifestyle news), translate in the appropriate natural Korean style for that domain.\n\nUse these inferences to pick the appropriate Korean phrasing, formality, and technical vocabulary. Do NOT include any of this analysis in your output.\n\nRewrite policy:\n- no_change: DRAFT is already accurate and natural.\n- minor_edit: only small wording or fluency fixes are needed.\n- major_edit: substantial edits are needed, but DRAFT still provides useful structure.\n- rewrite: DRAFT quality is poor (meaning distortion, omission, hallucination, or severe unnaturalness). In this case, ignore DRAFT phrasing and re-translate from SOURCE from scratch.\n- invalid: SOURCE is not translatable or invalid. Line 2+ should contain a short Korean reason.\n\nThen follow these rules strictly:\n1) Output format:\n   - Line 1: one label in [no_change, minor_edit, major_edit, rewrite, invalid]\n   - Line 2+: final Korean translation only (or short Korean reason only when label is invalid)\n   - No preface, no explanation, no markdown, no quotes, no prefixes.\n2) Numbers & units: Preserve all numeric values, decimals, percentages (%), basis points (bps), currency symbols ($, ¥, €, ₩), and date formats exactly as written. Do not round or reformat.\n3) Proper nouns: Keep company names, person names, ticker symbols, and indices in their original form unless a widely-used Korean name exists.\n4) Acronyms: Keep English acronyms as-is (GDP, PCE, FOMC, CPI, AI, GPU, mRNA, etc.). Do NOT introduce a Korean gloss in parentheses unless the source already contains one.\n5) Parentheticals: If the source has parenthetical expressions, keep them in parentheses in the same position.\n6) Faithfulness: Translate the full meaning. Do not summarize, omit, or add information.\n\n[SOURCE]\n{source}\n\n[METADATA]\n{metadata_json}\n\n[DRAFT]\n{student}\n"
+    metadata:
+      include: true
+      render_format: json
+      allowed_fields:
+        - dataset
+        - document_type
+        - text_role
+        - title
+run:
+  run_id: local_contract
+  seed: 42
+version: 1

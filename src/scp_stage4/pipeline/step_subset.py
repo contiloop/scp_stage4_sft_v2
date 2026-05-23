@@ -1305,100 +1305,20 @@ def _best_subset_indices_for_retention(
     return [subset_idx for subset_idx, _ in sorted_items[:keep_best_n]]
 
 
-def _path_size_bytes(path: Path) -> int:
-    if not path.exists():
-        return 0
-    if path.is_file():
-        return int(path.stat().st_size)
-    total = 0
-    for child in path.rglob("*"):
-        if child.is_file():
-            total += int(child.stat().st_size)
-    return total
-
-
 def _prune_subset_checkpoints_if_configured(ctx: PipelineContext) -> dict[str, int]:
     current_subset_idx = int(ctx.subset_idx)
     keep_last_n = _checkpoint_retention_keep_last_n(ctx.cfg)
-    keep_best_n = _checkpoint_retention_keep_best_n(ctx.cfg)
-    metric_for_best = _checkpoint_retention_metric_for_best(ctx.cfg)
-    greater_is_better = _checkpoint_retention_greater_is_better(ctx.cfg)
-
     preserve_previous = set(range(max(0, current_subset_idx - keep_last_n), current_subset_idx))
-    preserve_best = set(
-        _best_subset_indices_for_retention(ctx=ctx, upto_subset_idx=current_subset_idx)
-    )
+    preserve_best = set(_best_subset_indices_for_retention(ctx=ctx, upto_subset_idx=current_subset_idx))
     preserve_subset_indices = set(preserve_previous)
     preserve_subset_indices.update(preserve_best)
     preserve_subset_indices.add(current_subset_idx)
 
-    subset_root = ctx.run_root / "subsets"
-    if not subset_root.exists():
-        return {
-            "subset_count": 0,
-            "deleted_count": 0,
-            "freed_bytes": 0,
-            "preserved_subset_count": len(preserve_subset_indices),
-            "preserved_best_count": len(preserve_best),
-        }
-
-    preserve_names = {
-        "train_rows.jsonl",
-        "checkpoint_state.json",
-        "worker_checkpoint_state.json",
-        "PRUNED_CHECKPOINTS.json",
-    }
-    subset_count = 0
-    deleted_count = 0
-    freed_bytes = 0
-
-    for subset_dir in sorted(subset_root.glob("subset_*")):
-        if not subset_dir.is_dir():
-            continue
-        try:
-            subset_num = int(subset_dir.name.split("_")[-1])
-        except ValueError:
-            continue
-        if subset_num in preserve_subset_indices or subset_num >= current_subset_idx:
-            continue
-        train_final_dir = subset_dir / "train_final"
-        if not train_final_dir.exists() or not train_final_dir.is_dir():
-            continue
-
-        removed: list[str] = []
-        for child in sorted(train_final_dir.iterdir()):
-            if child.name in preserve_names:
-                continue
-            freed_bytes += _path_size_bytes(child)
-            if child.is_dir():
-                shutil.rmtree(child)
-            else:
-                child.unlink(missing_ok=True)
-            removed.append(child.name)
-            deleted_count += 1
-        if not removed:
-            continue
-
-        subset_count += 1
-        _write_json_file(
-            train_final_dir / "PRUNED_CHECKPOINTS.json",
-            {
-                "status": "ok",
-                "run_id": ctx.run_id,
-                "subset_idx": subset_num,
-                "retention_keep_last_n": keep_last_n,
-                "retention_keep_best_n": keep_best_n,
-                "retention_metric_for_best": metric_for_best,
-                "retention_greater_is_better": greater_is_better,
-                "preserved_subset_indices": sorted(preserve_subset_indices),
-                "deleted_entries": removed,
-            },
-        )
-
     return {
-        "subset_count": subset_count,
-        "deleted_count": deleted_count,
-        "freed_bytes": freed_bytes,
+        # Checkpoint deletion is intentionally disabled.
+        "subset_count": 0,
+        "deleted_count": 0,
+        "freed_bytes": 0,
         "preserved_subset_count": len(preserve_subset_indices),
         "preserved_best_count": len(preserve_best),
     }
