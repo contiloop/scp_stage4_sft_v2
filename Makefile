@@ -59,19 +59,18 @@ PIN_HF_HUB_VERSION ?= 0.36.2
 PIN_HF_XET_VERSION ?= 1.5.0
 PIN_FLASH_ATTN_VERSION ?= 2.8.3
 PIN_SETUPTOOLS_SPEC ?= "setuptools>=77.0.3,<81.0.0"
+# Keep numpy below 2.3 for numba compatibility while satisfying mistral-common.
+PIN_NUMPY_VERSION ?= 2.2.6
 
 # FlashAttention2 wheel hosted in a HF dataset.
 # - FLASH_ATTN_GPU_ARCH: auto | sm80 | sm120 | default
 # - FLASH_ATTN_WHL_SM80 / FLASH_ATTN_WHL_SM120: arch-specific wheel names
 # - FLASH_ATTN_WHL: fallback/default wheel name
-# If a wheel is unavailable, install fails by default (no source fallback).
-# Set FLASH_ATTN_SOURCE_FALLBACK=1 to compile locally.
 FLASH_ATTN_REPO ?= alwaysgood/scp-stage4-wheels
 FLASH_ATTN_WHL ?= flash_attn-$(PIN_FLASH_ATTN_VERSION)-$(PYTHON_TAG)-$(PYTHON_TAG)-linux_x86_64.whl
 FLASH_ATTN_WHL_SM80 ?= flash_attn-$(PIN_FLASH_ATTN_VERSION)-1sm80-$(PYTHON_TAG)-$(PYTHON_TAG)-linux_x86_64.whl
 FLASH_ATTN_WHL_SM120 ?= flash_attn-$(PIN_FLASH_ATTN_VERSION)-1sm120-$(PYTHON_TAG)-$(PYTHON_TAG)-linux_x86_64.whl
 FLASH_ATTN_GPU_ARCH ?= auto
-FLASH_ATTN_SOURCE_FALLBACK ?= 0
 
 .PHONY: set set-real-env validate-config validate-jsonl validate-local test-local smoke-local \
 	validate-remote-env smoke-remote-qe smoke-remote-model smoke-remote-api dry-run-remote-subset \
@@ -146,6 +145,7 @@ set-real-env:
 		"transformers==$(PIN_TRANSFORMERS_VERSION)" \
 		"huggingface_hub>=$(PIN_HF_HUB_VERSION),<1" \
 		"hf-xet>=$(PIN_HF_XET_VERSION),<2"
+	@$(REAL_ENV_PY) -m pip install --upgrade "numpy==$(PIN_NUMPY_VERSION)"
 	# FlashAttention2: choose wheel by GPU arch (sm80/sm120) when possible.
 	@arch_choice="$(FLASH_ATTN_GPU_ARCH)"; \
 	selected_whl="$(FLASH_ATTN_WHL)"; \
@@ -165,9 +165,6 @@ set-real-env:
 	if $(REAL_ENV_PY) -m pip install \
 		"https://huggingface.co/datasets/$(FLASH_ATTN_REPO)/resolve/main/$$selected_whl"; then \
 		echo "  flash_attn wheel install ok: $$selected_whl"; \
-	elif [ "$(FLASH_ATTN_SOURCE_FALLBACK)" = "1" ]; then \
-		echo "  flash_attn wheel unavailable, building flash-attn==$(PIN_FLASH_ATTN_VERSION) from source"; \
-		FLASH_ATTENTION_FORCE_BUILD=TRUE $(REAL_ENV_PY) -m pip install --no-build-isolation "flash-attn==$(PIN_FLASH_ATTN_VERSION)"; \
 	else \
 		echo "  [ERROR] flash_attn wheel unavailable: $$selected_whl"; \
 		exit 1; \
@@ -179,6 +176,7 @@ set-real-env:
 	fi
 	@$(REAL_ENV_PY) -c "from fla.ops.gated_delta_rule import chunk_gated_delta_rule" 2>/dev/null \
 		|| $(REAL_ENV_PY) -m pip install flash-linear-attention
+	@$(REAL_ENV_PY) -m pip install --upgrade "numpy==$(PIN_NUMPY_VERSION)"
 	@$(MAKE) verify-cuda-kernels REAL_ENV_PY=$(REAL_ENV_PY) SKIP_CAUSAL_CONV1D=$(SKIP_CAUSAL_CONV1D)
 	@$(REAL_ENV_PY) -m pip check
 	@$(REAL_ENV_PY) -c 'import sys, torch; print("set-real-env:", sys.executable, "torch", torch.__version__)'

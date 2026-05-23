@@ -36,7 +36,8 @@ PY
 }
 
 ensure_installed() {
-  "$PYTHON_BIN" -m pip install -q --upgrade "setuptools>=70.1.0" wheel packaging ninja numpy
+  # Keep numpy version managed by the top-level environment installer.
+  "$PYTHON_BIN" -m pip install -q --upgrade "setuptools>=70.1.0" wheel packaging ninja
 
   if "$PYTHON_BIN" -c "import causal_conv1d" >/dev/null 2>&1; then
     return 0
@@ -79,15 +80,15 @@ if kernel_smoke_test; then
   exit 0
 fi
 
-if [[ "${CC}" == "12.0" ]]; then
-  echo "  Blackwell detected and kernel test failed -> rebuild causal-conv1d==1.6.1 from source"
-  "$PYTHON_BIN" -m pip uninstall -y causal-conv1d >/dev/null 2>&1 || true
-  CAUSAL_CONV1D_FORCE_BUILD=TRUE TORCH_CUDA_ARCH_LIST=12.0 \
-    "$PYTHON_BIN" -m pip install -v --no-build-isolation --no-binary :all: causal-conv1d==1.6.1
+  if [[ "${CC}" == "12.0" ]]; then
+    echo "  Blackwell detected and kernel test failed -> rebuild causal-conv1d==1.6.1 from source"
+    "$PYTHON_BIN" -m pip uninstall -y causal-conv1d >/dev/null 2>&1 || true
+    CAUSAL_CONV1D_FORCE_BUILD=TRUE TORCH_CUDA_ARCH_LIST=12.0 \
+    "$PYTHON_BIN" -m pip install -v --no-deps --no-build-isolation --no-binary :all: causal-conv1d==1.6.1
 else
   echo "  non-Blackwell kernel test failed -> reinstall causal-conv1d"
   "$PYTHON_BIN" -m pip uninstall -y causal-conv1d >/dev/null 2>&1 || true
-  "$PYTHON_BIN" -m pip install causal-conv1d
+  "$PYTHON_BIN" -m pip install --no-deps causal-conv1d
 fi
 
 if kernel_smoke_test; then
