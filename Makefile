@@ -150,9 +150,9 @@ set-real-env:
 	@arch_choice="$(FLASH_ATTN_GPU_ARCH)"; \
 	selected_whl="$(FLASH_ATTN_WHL)"; \
 	py_tag="$(PYTHON_TAG)"; \
-	py_ver="$$( $(REAL_ENV_PY) -c 'import sys; print(f\"{sys.version_info.major}.{sys.version_info.minor}\")' )"; \
+	py_ver="$$( $(REAL_ENV_PY) -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' )"; \
 	if [ "$$arch_choice" = "auto" ]; then \
-		detected="$$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | awk -F'.' 'BEGIN{max=0} {gsub(/[^0-9.]/,\"\"); if ($$1 ~ /^[0-9]+$$/) {minor=$$2; if (minor !~ /^[0-9]+$$/) minor=0; val=($$1*10)+minor; if (val>max) max=val;}} END{if (max>0) printf \"sm%d\", max;}')"; \
+		detected="$$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | awk -F'.' 'BEGIN{max=0} {gsub(/[^0-9.]/,""); if ($$1 ~ /^[0-9]+$$/) {minor=$$2; if (minor !~ /^[0-9]+$$/) minor=0; val=($$1*10)+minor; if (val>max) max=val;}} END{if (max>0) printf "sm%d", max;}')"; \
 		if [ -n "$$detected" ]; then arch_choice="$$detected"; else arch_choice="default"; fi; \
 	fi; \
 	case "$$arch_choice" in \
