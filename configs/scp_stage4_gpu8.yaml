@@ -90,7 +90,7 @@ data:
   num_workers: 4
 inference:
   runtime:
-    mode: mock
+    mode: subprocess
     unsloth:
       enabled: true
       fallback_to_transformers: false
@@ -107,7 +107,10 @@ inference:
         - 7
       shard_strategy: order_split
     subprocess:
-      command: null
+      command:
+        - python3
+        - -m
+        - scp_stage4.pipeline.workers.vllm_inference_worker
   q1:
     do_sample: false
     temperature: 0.0
@@ -172,11 +175,23 @@ pipeline:
 training:
   backend: unsloth
   runtime:
-    mode: mock
+    mode: subprocess
     subprocess:
-      collapse_command: null
-      unload_command: null
-      update_command: null
+      collapse_command:
+        - torchrun
+        - --nproc_per_node=1
+        - -m
+        - scp_stage4.pipeline.workers.training_worker
+      unload_command:
+        - torchrun
+        - --nproc_per_node=1
+        - -m
+        - scp_stage4.pipeline.workers.training_worker
+      update_command:
+        - torchrun
+        - --nproc_per_node=1
+        - -m
+        - scp_stage4.pipeline.workers.training_worker
   collapse_lora:
     rank: 4
     learning_rate: 0.0025
@@ -221,7 +236,7 @@ training:
       max_grad_norm: 5.0
     batching:
       per_device_train_batch_size: 8
-      gradient_accumulation_steps: 4
+      gradient_accumulation_steps: 16
       per_device_eval_batch_size: 8
       packing: false
     data:
@@ -240,9 +255,12 @@ training:
     upload_to_wandb: false
 qe:
   runtime:
-    mode: mock
+    mode: subprocess
     subprocess:
-      command: null
+      command:
+        - python3
+        - -m
+        - scp_stage4.pipeline.workers.qe_worker
   multi_gpu:
     enabled: true
     gpu_ids:
@@ -290,9 +308,12 @@ qe:
       metricx_python_env: METRICX_PYTHON
 external_api:
   runtime:
-    mode: mock
+    mode: subprocess
     subprocess:
-      command: null
+      command:
+        - python3
+        - -m
+        - scp_stage4.pipeline.workers.external_api_worker
   routing:
     mode: weighted
     seed: 42
