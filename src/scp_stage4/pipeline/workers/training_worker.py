@@ -768,6 +768,12 @@ def _instantiate_trainer(
     )
 
     fp16, bf16 = _trainer_device_flags()
+    if is_main_process:
+        precision_mode = "bf16" if bf16 else ("fp16" if fp16 else "fp32")
+        print(
+            f"[training-worker] precision mode: {precision_mode} (fp16={fp16}, bf16={bf16})",
+            file=sys.stderr,
+        )
     common_train_args: dict[str, Any] = {
         "output_dir": str(output_dir),
         "per_device_train_batch_size": _env_int("TRAIN_BATCH_SIZE", 0) or _as_positive_int(
