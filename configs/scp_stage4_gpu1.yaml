@@ -291,7 +291,7 @@ external_api:
         model: gemini-3.1-flash-lite
         params:
           thinking_mode: off
-        weight: 0.7
+        weight: 0.8
       -
         name: gemini-3.1-flash-lite-dynamic
         provider: gemini
@@ -308,21 +308,12 @@ external_api:
           reasoning_effort: medium
           text_verbosity: low
         weight: 0.1
-      -
-        name: opus-4.7-adaptive
-        provider: anthropic
-        model: claude-opus-4-7
-        params:
-          thinking_mode: adaptive
-          adaptive_effort: medium
-          thinking_display: summarized
-        weight: 0.1
   concurrency:
-    max_workers: 18
+    max_workers: 24
     per_provider:
       openai: 4
-      anthropic: 4
-      gemini: 12
+      anthropic: 1
+      gemini: 20
     min_request_interval_sec: 0.0
   primary:
     provider: openai
@@ -333,7 +324,7 @@ external_api:
       enabled: true
       api_key_env: OPENAI_API_KEY
     anthropic:
-      enabled: true
+      enabled: false
       api_key_env: ANTHROPIC_API_KEY
     gemini:
       enabled: true
