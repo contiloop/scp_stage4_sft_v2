@@ -298,8 +298,8 @@ qe:
         top_fraction: 0.01
         repetition_filter:
           enabled: true
-          char_rep_max_unit: 8
-          min_mt_char_rep: 6
+          char_rep_max_unit: 24
+          min_mt_char_rep: 3
           min_excess_over_source: 1
   isolation:
     enabled: true
