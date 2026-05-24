@@ -10,6 +10,7 @@ import logging
 import math
 import os
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -1933,6 +1934,14 @@ def _select_fragile(scored_rows: Sequence[Mapping[str, Any]], cfg: Mapping[str, 
     char_rep_max_unit = int(repetition_cfg.get("char_rep_max_unit", 8))
     min_mt_char_rep = int(repetition_cfg.get("min_mt_char_rep", 6))
     min_excess_over_source = int(repetition_cfg.get("min_excess_over_source", 1))
+    clause_min_chars = int(repetition_cfg.get("clause_min_chars", 16))
+    min_duplicate_clauses = int(repetition_cfg.get("min_duplicate_clauses", 1))
+    span_min_tokens = int(repetition_cfg.get("span_min_tokens", 8))
+    span_max_tokens = int(repetition_cfg.get("span_max_tokens", 24))
+    min_immediate_span_repeats = int(repetition_cfg.get("min_immediate_span_repeats", 1))
+    min_severity_excess_over_source = int(
+        repetition_cfg.get("min_severity_excess_over_source", 1)
+    )
 
     def _char_rep(text: str, *, max_unit: int) -> int:
         s = text or ""
@@ -1955,12 +1964,77 @@ def _select_fragile(scored_rows: Sequence[Mapping[str, Any]], cfg: Mapping[str, 
                 idx = cursor if run > 1 else idx + 1
         return best
 
+    def _normalize_clause(clause: str) -> str:
+        collapsed = re.sub(r"\s+", " ", clause).strip().lower()
+        return re.sub(r"^[^\w]+|[^\w]+$", "", collapsed)
+
+    def _duplicate_clause_excess(text: str) -> int:
+        if not text:
+            return 0
+        raw_parts = re.split(r"[,\n\r\t;:.!?。！？；：]+", text)
+        counts: dict[str, int] = {}
+        for part in raw_parts:
+            normalized = _normalize_clause(part)
+            if len(normalized) < clause_min_chars:
+                continue
+            counts[normalized] = counts.get(normalized, 0) + 1
+        return sum(max(0, count - 1) for count in counts.values())
+
+    def _tokenize(text: str) -> list[str]:
+        if not text:
+            return []
+        tokens: list[str] = []
+        for raw in text.split():
+            normalized = re.sub(r"^[^\w]+|[^\w]+$", "", raw.lower())
+            if normalized:
+                tokens.append(normalized)
+        return tokens
+
+    def _max_immediate_span_repeats(tokens: Sequence[str]) -> int:
+        n_tokens = len(tokens)
+        if n_tokens < 2:
+            return 0
+        best = 0
+        min_span = max(1, span_min_tokens)
+        max_span = min(span_max_tokens, n_tokens // 2)
+        if min_span > max_span:
+            return 0
+        for span_len in range(min_span, max_span + 1):
+            idx = 0
+            while idx + (2 * span_len) <= n_tokens:
+                unit = tokens[idx : idx + span_len]
+                cursor = idx + span_len
+                repeats = 0
+                while cursor + span_len <= n_tokens and tokens[cursor : cursor + span_len] == unit:
+                    repeats += 1
+                    cursor += span_len
+                if repeats > best:
+                    best = repeats
+                idx = cursor if repeats > 0 else idx + 1
+        return best
+
     def _is_abnormal_repetition(*, source: str, mt_q1: str) -> bool:
         mt_char_rep = _char_rep(mt_q1, max_unit=char_rep_max_unit)
-        if mt_char_rep < min_mt_char_rep:
-            return False
-        src_char_rep = _char_rep(source, max_unit=char_rep_max_unit)
-        return mt_char_rep >= (src_char_rep + min_excess_over_source)
+        char_abnormal = False
+        if mt_char_rep >= min_mt_char_rep:
+            src_char_rep = _char_rep(source, max_unit=char_rep_max_unit)
+            char_abnormal = mt_char_rep >= (src_char_rep + min_excess_over_source)
+
+        mt_clause_dup = _duplicate_clause_excess(mt_q1)
+        src_clause_dup = _duplicate_clause_excess(source)
+        clause_abnormal = (
+            mt_clause_dup >= min_duplicate_clauses
+            and mt_clause_dup >= (src_clause_dup + min_severity_excess_over_source)
+        )
+
+        mt_span_repeats = _max_immediate_span_repeats(_tokenize(mt_q1))
+        src_span_repeats = _max_immediate_span_repeats(_tokenize(source))
+        span_abnormal = (
+            mt_span_repeats >= min_immediate_span_repeats
+            and mt_span_repeats >= (src_span_repeats + min_severity_excess_over_source)
+        )
+
+        return char_abnormal or clause_abnormal or span_abnormal
 
     if repetition_enabled:
         eligible_rows = [

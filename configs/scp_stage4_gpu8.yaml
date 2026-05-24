@@ -301,6 +301,12 @@ qe:
           char_rep_max_unit: 24
           min_mt_char_rep: 3
           min_excess_over_source: 1
+          clause_min_chars: 16
+          min_duplicate_clauses: 1
+          span_min_tokens: 8
+          span_max_tokens: 24
+          min_immediate_span_repeats: 1
+          min_severity_excess_over_source: 1
   isolation:
     enabled: true
     env:
@@ -334,14 +340,6 @@ external_api:
         params:
           thinking_mode: dynamic
           thinking_budget: -1
-        weight: 0.1
-      -
-        name: gpt-5.5-thinking
-        provider: openai
-        model: gpt-5.5
-        params:
-          reasoning_effort: medium
-          text_verbosity: low
         weight: 0.1
   concurrency:
     max_workers: 24

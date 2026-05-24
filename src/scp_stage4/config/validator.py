@@ -493,6 +493,12 @@ def validate_config(cfg: dict[str, Any]) -> None:
         "char_rep_max_unit": 1,
         "min_mt_char_rep": 2,
         "min_excess_over_source": 0,
+        "clause_min_chars": 1,
+        "min_duplicate_clauses": 1,
+        "span_min_tokens": 1,
+        "span_max_tokens": 1,
+        "min_immediate_span_repeats": 1,
+        "min_severity_excess_over_source": 0,
     }
     for key, lower_bound in int_constraints.items():
         value = repetition_filter.get(key)
@@ -503,6 +509,19 @@ def validate_config(cfg: dict[str, Any]) -> None:
                 errors,
                 f"qe.scoring.selection.default_rule.repetition_filter.{key} must be an integer >= {lower_bound}",
             )
+    span_min_tokens = repetition_filter.get("span_min_tokens")
+    span_max_tokens = repetition_filter.get("span_max_tokens")
+    if (
+        isinstance(span_min_tokens, int)
+        and not isinstance(span_min_tokens, bool)
+        and isinstance(span_max_tokens, int)
+        and not isinstance(span_max_tokens, bool)
+        and span_max_tokens < span_min_tokens
+    ):
+        _err(
+            errors,
+            "qe.scoring.selection.default_rule.repetition_filter.span_max_tokens must be >= span_min_tokens",
+        )
 
     subset_cfg = _as_dict(pipeline.get("subset", {}), "pipeline.subset", errors)
     strategy = subset_cfg.get("strategy")
