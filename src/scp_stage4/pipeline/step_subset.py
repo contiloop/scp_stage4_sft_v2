@@ -1923,6 +1923,20 @@ def _select_fragile(scored_rows: Sequence[Mapping[str, Any]], cfg: Mapping[str, 
     top_fraction = float(
         _get_by_dotpath(cfg, "qe.scoring.selection.default_rule.top_fraction", 0.1)
     )
+    excluded_datasets_raw = _get_by_dotpath(
+        cfg,
+        "qe.scoring.selection.default_rule.excluded_datasets",
+        [],
+    )
+    excluded_datasets = (
+        {
+            str(value).strip()
+            for value in excluded_datasets_raw
+            if isinstance(value, str) and value.strip()
+        }
+        if isinstance(excluded_datasets_raw, list)
+        else set()
+    )
     repetition_cfg = _get_by_dotpath(
         cfg,
         "qe.scoring.selection.default_rule.repetition_filter",
@@ -2040,13 +2054,18 @@ def _select_fragile(scored_rows: Sequence[Mapping[str, Any]], cfg: Mapping[str, 
         eligible_rows = [
             dict(row)
             for row in scored_rows
+            if str(row.get("dataset", "")) not in excluded_datasets
             if not _is_abnormal_repetition(
                 source=str(row.get("source", "")),
                 mt_q1=str(row.get("mt_q1", "")),
             )
         ]
     else:
-        eligible_rows = [dict(row) for row in scored_rows]
+        eligible_rows = [
+            dict(row)
+            for row in scored_rows
+            if str(row.get("dataset", "")) not in excluded_datasets
+        ]
 
     eligible_sorted = sorted(
         eligible_rows,

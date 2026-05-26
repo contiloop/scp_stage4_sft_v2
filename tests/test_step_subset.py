@@ -260,6 +260,74 @@ def test_run_score_repetition_filter_can_be_disabled_by_config() -> None:
         _cleanup(run_id)
 
 
+def test_run_score_excludes_configured_datasets_from_selection_only() -> None:
+    run_id = "test_score_dataset_exclude"
+    _cleanup(run_id)
+    try:
+        subset_root = _subset_root(run_id)
+        subset_root.mkdir(parents=True, exist_ok=True)
+        metadata = {
+            "title": None,
+            "document_type": "article",
+            "text_role": "body",
+            "original_id": None,
+            "parent_id": None,
+            "chunk_idx": None,
+        }
+        write_jsonl(
+            subset_root / "q1.jsonl",
+            [
+                {
+                    "id": "c4_hardest",
+                    "dataset": "alwaysgood/c4-semantic-deduped",
+                    "source": "general web source",
+                    "metadata": metadata,
+                    "mt_q1": "general web translation",
+                    "qe_q1": 0.01,
+                    "qe_raw_q1": 0.01,
+                    "metricx_q1_clamped": False,
+                },
+                {
+                    "id": "reuter_hard",
+                    "dataset": "alwaysgood/reuter-semantic-deduped",
+                    "source": "market source",
+                    "metadata": metadata,
+                    "mt_q1": "market translation",
+                    "qe_q1": 0.20,
+                    "qe_raw_q1": 0.20,
+                    "metricx_q1_clamped": False,
+                },
+                {
+                    "id": "bloomberg_easy",
+                    "dataset": "alwaysgood/bloomberg-semantic-deduped",
+                    "source": "business source",
+                    "metadata": metadata,
+                    "mt_q1": "business translation",
+                    "qe_q1": 0.90,
+                    "qe_raw_q1": 0.90,
+                    "metricx_q1_clamped": False,
+                },
+            ],
+        )
+
+        run_score(
+            config_path="configs/scp_stage4.yaml",
+            overrides=[
+                "qe.scoring.selection.default_rule.top_fraction=0.5",
+                'qe.scoring.selection.default_rule.excluded_datasets=["alwaysgood/c4-semantic-deduped"]',
+            ],
+            run_id_override=run_id,
+            subset_idx=0,
+        )
+
+        scored = read_jsonl(subset_root / "scored.jsonl")
+        selected = read_jsonl(subset_root / "selected.jsonl")
+        assert [row["id"] for row in scored] == ["c4_hardest", "reuter_hard", "bloomberg_easy"]
+        assert [row["id"] for row in selected] == ["reuter_hard"]
+    finally:
+        _cleanup(run_id)
+
+
 def test_run_subset_writes_stepwise_artifact_chain() -> None:
     run_id = "test_step_subset_run"
     _cleanup(run_id)

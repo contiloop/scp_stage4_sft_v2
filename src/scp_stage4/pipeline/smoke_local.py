@@ -141,13 +141,34 @@ def _select_fragile(scored_rows: list[dict[str, Any]], cfg: dict[str, Any]) -> l
     top_fraction = float(
         _get_by_dotpath(cfg, "qe.scoring.selection.default_rule.top_fraction", 0.1)
     )
+    excluded_datasets_raw = _get_by_dotpath(
+        cfg,
+        "qe.scoring.selection.default_rule.excluded_datasets",
+        [],
+    )
+    excluded_datasets = (
+        {
+            str(value).strip()
+            for value in excluded_datasets_raw
+            if isinstance(value, str) and value.strip()
+        }
+        if isinstance(excluded_datasets_raw, list)
+        else set()
+    )
 
     eligible_sorted = sorted(
-        scored_rows,
+        [
+            row
+            for row in scored_rows
+            if str(row.get("dataset", "")) not in excluded_datasets
+        ],
         key=lambda r: (-float(r["score_s"]), str(r["id"])),
     )
 
-    keep = max(1, int(len(scored_rows) * top_fraction + 0.999999))
+    if not eligible_sorted:
+        return []
+
+    keep = max(1, int(len(eligible_sorted) * top_fraction + 0.999999))
     selected_ranked = eligible_sorted[: min(keep, len(eligible_sorted))]
     rank_by_id = {row["id"]: idx for idx, row in enumerate(selected_ranked, start=1)}
     selected_id_set = set(rank_by_id.keys())

@@ -479,6 +479,16 @@ def validate_config(cfg: dict[str, Any]) -> None:
         or not (0.0 < float(top_fraction) <= 1.0)
     ):
         _err(errors, "qe.scoring.selection.default_rule.top_fraction must be in (0, 1]")
+    excluded_datasets = qe_default_rule.get("excluded_datasets", [])
+    if not isinstance(excluded_datasets, list):
+        _err(errors, "qe.scoring.selection.default_rule.excluded_datasets must be a list")
+    else:
+        for idx, dataset in enumerate(excluded_datasets):
+            if not isinstance(dataset, str) or not dataset.strip():
+                _err(
+                    errors,
+                    f"qe.scoring.selection.default_rule.excluded_datasets[{idx}] must be a non-empty string",
+                )
 
     repetition_filter = _as_dict(
         qe_default_rule.get("repetition_filter", {}),

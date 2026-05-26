@@ -234,6 +234,18 @@ class ConfigValidationTests(unittest.TestCase):
             validate_config(cfg)
 
         cfg = compose_config("configs/scp_stage4.yaml")
+        cfg["qe"]["scoring"]["selection"]["default_rule"][
+            "excluded_datasets"
+        ] = "alwaysgood/c4-semantic-deduped"
+        with self.assertRaises(ConfigValidationError):
+            validate_config(cfg)
+
+        cfg = compose_config("configs/scp_stage4.yaml")
+        cfg["qe"]["scoring"]["selection"]["default_rule"]["excluded_datasets"] = [""]
+        with self.assertRaises(ConfigValidationError):
+            validate_config(cfg)
+
+        cfg = compose_config("configs/scp_stage4.yaml")
         rep = cfg["qe"]["scoring"]["selection"]["default_rule"]["repetition_filter"]
         rep["enabled"] = False
         rep["char_rep_max_unit"] = 8
