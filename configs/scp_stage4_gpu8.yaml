@@ -296,6 +296,8 @@ qe:
     selection:
       default_rule:
         top_fraction: 0.01
+        excluded_datasets:
+          - alwaysgood/c4-semantic-deduped
         repetition_filter:
           enabled: true
           char_rep_max_unit: 24
