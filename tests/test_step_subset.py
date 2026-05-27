@@ -685,6 +685,77 @@ def test_run_subset_with_subprocess_runtimes() -> None:
         _cleanup(run_id)
 
 
+def test_vllm_inprocess_reuses_engine_with_single_gpu(monkeypatch, tmp_path: Path) -> None:
+    config_path = str(Path(__file__).resolve().parents[1] / "configs" / "scp_stage4.yaml")
+    monkeypatch.chdir(tmp_path)
+
+    import scp_stage4.pipeline.workers.vllm_inference_worker as worker_mod
+
+    load_calls: list[int] = []
+
+    def _fake_load_engine(requests):
+        load_calls.append(len(requests))
+        return object(), None, None
+
+    def _fake_generate_all(*, llm, requests, base_lora_request, collapse_lora_request):
+        return [
+            {
+                "id": str(row["id"]),
+                "order_idx": int(row.get("order_idx", idx)),
+                "status": "ok",
+                "mt": f"KO::{row['id']}",
+                "error": None,
+            }
+            for idx, row in enumerate(requests)
+        ]
+
+    monkeypatch.setattr(worker_mod, "_resolve_model_name", lambda request: "test-model")
+    monkeypatch.setattr(worker_mod, "_resolve_vllm_kwargs", lambda request: {"dtype": "auto"})
+    monkeypatch.setattr(worker_mod, "_resolve_base_lora_path", lambda request: None)
+    monkeypatch.setattr(worker_mod, "_resolve_lora_path", lambda request: None)
+    monkeypatch.setattr(worker_mod, "_load_engine", _fake_load_engine)
+    monkeypatch.setattr(worker_mod, "_generate_all", _fake_generate_all)
+    monkeypatch.setattr(worker_mod, "_shutdown_engine", lambda llm: None)
+
+    ctx = step_subset_mod._build_context(
+        config_path=config_path,
+        overrides=[
+            "inference.runtime.mode=subprocess",
+            'inference.runtime.subprocess.command=["python3","-m","scp_stage4.pipeline.workers.vllm_inference_worker"]',
+            "inference.runtime.multi_gpu.enabled=false",
+            "inference.runtime.vllm_inprocess.enabled=true",
+        ],
+        run_id_override="test_vllm_inprocess_reuse",
+        subset_idx=0,
+    )
+
+    rows = [
+        {
+            "id": "row_0",
+            "order_idx": 0,
+            "source": "hello",
+            "runtime_config": {"model": {}},
+        }
+    ]
+    try:
+        first = step_subset_mod._run_inference_subprocess_jsonl(
+            ctx=ctx,
+            phase="infer-q1",
+            input_rows=rows,
+        )
+        second = step_subset_mod._run_inference_subprocess_jsonl(
+            ctx=ctx,
+            phase="infer-ood",
+            input_rows=rows,
+        )
+    finally:
+        step_subset_mod._shutdown_vllm_inprocess_engine_cache()
+
+    assert [row["mt"] for row in first] == ["KO::row_0"]
+    assert [row["mt"] for row in second] == ["KO::row_0"]
+    assert len(load_calls) == 1
+
+
 def test_run_subset_with_multi_gpu_inference_shards_merges_deterministically() -> None:
     run_id = "test_step_subset_multi_gpu_infer_shards"
     _cleanup(run_id)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import csv
 import hashlib
 import json
@@ -316,6 +317,17 @@ class InferenceShardConfig:
     shard_strategy: str
 
 
+@dataclass
+class _VllmInprocessEngineState:
+    signature: str
+    llm: Any
+    base_lora_request: Any | None
+    collapse_lora_request: Any | None
+
+
+_VLLM_INPROCESS_ENGINE_STATE: _VllmInprocessEngineState | None = None
+
+
 def _build_context(
     *,
     config_path: str,
@@ -363,6 +375,62 @@ def _build_context(
         subset_root=subset_root,
         logger=logger,
     )
+
+
+def _is_vllm_inference_command(command: Sequence[str]) -> bool:
+    return any(
+        str(part).strip() == "scp_stage4.pipeline.workers.vllm_inference_worker"
+        for part in command
+    )
+
+
+def _vllm_inprocess_enabled(ctx: PipelineContext) -> bool:
+    raw = _get_by_dotpath(ctx.cfg, "inference.runtime.vllm_inprocess.enabled", True)
+    return bool(raw)
+
+
+def _vllm_inprocess_signature(request: Mapping[str, Any]) -> str:
+    from scp_stage4.pipeline.workers import vllm_inference_worker as worker
+
+    runtime_raw = request.get("runtime_config")
+    runtime_cfg = dict(runtime_raw) if isinstance(runtime_raw, Mapping) else {}
+    model_raw = runtime_cfg.get("model")
+    model_cfg = dict(model_raw) if isinstance(model_raw, Mapping) else {}
+    model_name = worker._resolve_model_name(request)
+    vllm_kwargs = dict(worker._resolve_vllm_kwargs(request))
+    base_lora = worker._resolve_base_lora_path(request)
+    collapse_lora = worker._resolve_lora_path(request)
+    need_lora = base_lora is not None or collapse_lora is not None
+    if need_lora:
+        vllm_kwargs["enable_lora"] = True
+        max_lora_rank = model_cfg.get("max_lora_rank", 64)
+        if isinstance(max_lora_rank, int) and max_lora_rank > 0:
+            vllm_kwargs["max_lora_rank"] = max_lora_rank
+    vllm_kwargs["language_model_only"] = True
+    signature_payload = {
+        "model": model_name,
+        "kwargs": vllm_kwargs,
+        "base_lora_path": str(base_lora) if base_lora is not None else None,
+        "collapse_lora_path": str(collapse_lora) if collapse_lora is not None else None,
+    }
+    return json.dumps(signature_payload, ensure_ascii=True, sort_keys=True)
+
+
+def _shutdown_vllm_inprocess_engine_cache() -> None:
+    global _VLLM_INPROCESS_ENGINE_STATE
+    state = _VLLM_INPROCESS_ENGINE_STATE
+    if state is None:
+        return
+    try:
+        from scp_stage4.pipeline.workers import vllm_inference_worker as worker
+
+        worker._shutdown_engine(state.llm)
+    except Exception:
+        pass
+    _VLLM_INPROCESS_ENGINE_STATE = None
+
+
+atexit.register(_shutdown_vllm_inprocess_engine_cache)
 
 
 def _context_for_phase(ctx: PipelineContext, phase: str) -> RequiredLogContext:
@@ -769,6 +837,13 @@ def _run_inference_subprocess_jsonl(
 ) -> list[dict[str, Any]]:
     shard_cfg = _resolve_inference_shard_config(ctx)
     if not shard_cfg.enabled or len(input_rows) <= 1:
+        command = _subprocess_command(ctx, "inference")
+        if _is_vllm_inference_command(command) and _vllm_inprocess_enabled(ctx):
+            return _run_inference_vllm_inprocess_jsonl(
+                ctx=ctx,
+                phase=phase,
+                input_rows=input_rows,
+            )
         return _run_subprocess_jsonl(
             ctx=ctx,
             section="inference",
@@ -876,6 +951,50 @@ def _run_inference_subprocess_jsonl(
 
     write_jsonl(full_output_path, merged_rows, ensure_ascii=False)
     return merged_rows
+
+
+def _run_inference_vllm_inprocess_jsonl(
+    *,
+    ctx: PipelineContext,
+    phase: str,
+    input_rows: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    from scp_stage4.pipeline.workers import vllm_inference_worker as worker
+
+    runtime_dir = ctx.subset_root / "runtime_io"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    input_path = runtime_dir / f"{phase}.input.jsonl"
+    output_path = runtime_dir / f"{phase}.output.jsonl"
+
+    requests = [dict(row) for row in input_rows]
+    write_jsonl(input_path, requests, ensure_ascii=False)
+    if not requests:
+        write_jsonl(output_path, [], ensure_ascii=False)
+        return []
+
+    global _VLLM_INPROCESS_ENGINE_STATE
+    signature = _vllm_inprocess_signature(requests[0])
+    state = _VLLM_INPROCESS_ENGINE_STATE
+    if state is None or state.signature != signature:
+        if state is not None:
+            worker._shutdown_engine(state.llm)
+        llm, base_lora_request, collapse_lora_request = worker._load_engine(requests)
+        state = _VllmInprocessEngineState(
+            signature=signature,
+            llm=llm,
+            base_lora_request=base_lora_request,
+            collapse_lora_request=collapse_lora_request,
+        )
+        _VLLM_INPROCESS_ENGINE_STATE = state
+
+    responses = worker._generate_all(
+        llm=state.llm,
+        requests=requests,
+        base_lora_request=state.base_lora_request,
+        collapse_lora_request=state.collapse_lora_request,
+    )
+    write_jsonl(output_path, responses, ensure_ascii=False)
+    return responses
 
 
 def _resolve_qe_shard_config(ctx: PipelineContext) -> InferenceShardConfig:
@@ -3721,54 +3840,57 @@ def run_stage(
     eval_summaries: list[dict[str, Any]] = []
     prefetch_future: Future[None] | None = None
 
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        if allow_prefetch and total_subsets > 0:
-            prefetch_future = pool.submit(_prefetch_next_input, 0)
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            if allow_prefetch and total_subsets > 0:
+                prefetch_future = pool.submit(_prefetch_next_input, 0)
 
-        for subset_idx in range(start_from_subset, total_subsets):
-            if prefetch_future is not None:
-                try:
-                    prefetch_future.result()
-                except Exception:
-                    pass  # logged inside _prefetch_next_input; run_subset will reload if needed
-                prefetch_future = None
+            for subset_idx in range(start_from_subset, total_subsets):
+                if prefetch_future is not None:
+                    try:
+                        prefetch_future.result()
+                    except Exception:
+                        pass  # logged inside _prefetch_next_input; run_subset will reload if needed
+                    prefetch_future = None
 
-            next_idx = subset_idx + 1
-            if allow_prefetch and next_idx < total_subsets:
-                prefetch_future = pool.submit(_prefetch_next_input, next_idx)
+                next_idx = subset_idx + 1
+                if allow_prefetch and next_idx < total_subsets:
+                    prefetch_future = pool.submit(_prefetch_next_input, next_idx)
 
-            phase_resume = start_from_phase if subset_idx == start_from_subset else None
-            summary = run_subset(
-                config_path=config_path,
-                overrides=overrides,
-                run_id_override=ctx.run_id,
-                subset_idx=subset_idx,
-                subset_size_override=subset_size,
-                use_prepared_data=True,
-                use_sampled_data=use_sampled_data,
-                stage_completed=False,
-                start_from_phase=phase_resume,
-                run_eval_after_subset=False,
-            )
-            should_run_eval = False
-            if eval_enabled:
-                is_final_subset = subset_idx == (total_subsets - 1)
-                is_cadence_subset = ((subset_idx + 1) % eval_every_n) == 0
-                should_run_eval = is_cadence_subset or (eval_run_on_final and is_final_subset)
-            if should_run_eval:
-                eval_summary = run_eval_ood(
+                phase_resume = start_from_phase if subset_idx == start_from_subset else None
+                summary = run_subset(
                     config_path=config_path,
                     overrides=overrides,
                     run_id_override=ctx.run_id,
                     subset_idx=subset_idx,
+                    subset_size_override=subset_size,
+                    use_prepared_data=True,
+                    use_sampled_data=use_sampled_data,
+                    stage_completed=False,
+                    start_from_phase=phase_resume,
+                    run_eval_after_subset=False,
                 )
-                summary["ood_eval"] = {
-                    "rows": int(eval_summary["rows"]),
-                    "summary_path": str(eval_summary["summary_path"]),
-                    "rows_path": str(eval_summary["rows_path"]),
-                }
-                eval_summaries.append(eval_summary)
-            subset_summaries.append(summary)
+                should_run_eval = False
+                if eval_enabled:
+                    is_final_subset = subset_idx == (total_subsets - 1)
+                    is_cadence_subset = ((subset_idx + 1) % eval_every_n) == 0
+                    should_run_eval = is_cadence_subset or (eval_run_on_final and is_final_subset)
+                if should_run_eval:
+                    eval_summary = run_eval_ood(
+                        config_path=config_path,
+                        overrides=overrides,
+                        run_id_override=ctx.run_id,
+                        subset_idx=subset_idx,
+                    )
+                    summary["ood_eval"] = {
+                        "rows": int(eval_summary["rows"]),
+                        "summary_path": str(eval_summary["summary_path"]),
+                        "rows_path": str(eval_summary["rows_path"]),
+                    }
+                    eval_summaries.append(eval_summary)
+                subset_summaries.append(summary)
+    finally:
+        _shutdown_vllm_inprocess_engine_cache()
 
     archived_subset_dirs_pruned = _finalize_stage_archive_cleanup(
         ctx=ctx,
