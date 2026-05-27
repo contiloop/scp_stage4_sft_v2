@@ -328,6 +328,65 @@ def test_run_score_excludes_configured_datasets_from_selection_only() -> None:
         _cleanup(run_id)
 
 
+def test_run_score_bucket_equal_balances_lengths() -> None:
+    """bucket_equal selects roughly equal counts per length bucket, even when
+    the qe-lowest rows are concentrated in long buckets."""
+    run_id = "test_score_bucket_equal"
+    _cleanup(run_id)
+    try:
+        subset_root = _subset_root(run_id)
+        subset_root.mkdir(parents=True, exist_ok=True)
+        metadata = {
+            "title": None,
+            "document_type": "article",
+            "text_role": "body",
+            "original_id": None,
+            "parent_id": None,
+            "chunk_idx": None,
+        }
+        # 36 synthetic rows: 6 per length-tier, qe lower for longer rows.
+        rows = []
+        tiers = [(50, 0.92), (300, 0.86), (700, 0.80), (1500, 0.72), (3000, 0.64), (6000, 0.58)]
+        for tier_idx, (length, base_qe) in enumerate(tiers):
+            for k in range(6):
+                qe = base_qe + 0.01 * k
+                rows.append({
+                    "id": f"tier{tier_idx}_{k}",
+                    "dataset": "alwaysgood/sec-10k-semantic-deduped",
+                    "source": "x" * length,
+                    "metadata": metadata,
+                    "mt_q1": "a" * (length // 4),
+                    "qe_q1": qe,
+                    "qe_raw_q1": qe,
+                    "metricx_q1_clamped": False,
+                })
+        write_jsonl(subset_root / "q1.jsonl", rows)
+
+        run_score(
+            config_path="configs/scp_stage4.yaml",
+            overrides=[
+                "qe.scoring.selection.default_rule.top_fraction=0.5",
+                "qe.scoring.selection.default_rule.mode=bucket_equal",
+                "qe.scoring.selection.default_rule.length_buckets=[200,500,1000,2000,5000]",
+                "qe.scoring.selection.default_rule.repetition_filter.enabled=false",
+            ],
+            run_id_override=run_id,
+            subset_idx=0,
+        )
+
+        selected = read_jsonl(subset_root / "selected.jsonl")
+        # 18 = 50% of 36; bucket_equal: 18 // 6 = 3 per bucket (+ no remainder).
+        assert len(selected) == 18
+        # Each tier prefix should appear exactly 3 times.
+        from collections import Counter
+        tier_counts = Counter(row["id"].split("_")[0] for row in selected)
+        assert tier_counts == {f"tier{i}": 3 for i in range(6)}, tier_counts
+        # All rules should carry the bucket_equal tag.
+        assert all(row["selection_rule"] == "default_rule:bucket_equal" for row in selected)
+    finally:
+        _cleanup(run_id)
+
+
 def test_run_subset_writes_stepwise_artifact_chain() -> None:
     run_id = "test_step_subset_run"
     _cleanup(run_id)

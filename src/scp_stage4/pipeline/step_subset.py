@@ -1923,6 +1923,18 @@ def _select_fragile(scored_rows: Sequence[Mapping[str, Any]], cfg: Mapping[str, 
     top_fraction = float(
         _get_by_dotpath(cfg, "qe.scoring.selection.default_rule.top_fraction", 0.1)
     )
+    selection_mode = str(
+        _get_by_dotpath(cfg, "qe.scoring.selection.default_rule.mode", "top_fraction")
+    ).strip().lower()
+    length_buckets_raw = _get_by_dotpath(
+        cfg,
+        "qe.scoring.selection.default_rule.length_buckets",
+        [200, 500, 1000, 2000, 5000],
+    )
+    if isinstance(length_buckets_raw, list):
+        length_buckets = sorted({int(v) for v in length_buckets_raw if isinstance(v, (int, float))})
+    else:
+        length_buckets = [200, 500, 1000, 2000, 5000]
     excluded_datasets_raw = _get_by_dotpath(
         cfg,
         "qe.scoring.selection.default_rule.excluded_datasets",
@@ -2076,7 +2088,51 @@ def _select_fragile(scored_rows: Sequence[Mapping[str, Any]], cfg: Mapping[str, 
         return []
 
     keep = max(1, int(len(eligible_sorted) * top_fraction + 0.999999))
-    ranked = eligible_sorted[: min(keep, len(eligible_sorted))]
+
+    if selection_mode == "bucket_equal":
+        # Length-stratified bottom-N: split eligible rows by source length into
+        # (K = len(length_buckets) + 1) buckets, then take floor(keep / K) per
+        # bucket sorted by score_s desc (= qe ascending). Any remainder is
+        # filled with the next-best rows pooled across all buckets to honor the
+        # overall `keep` budget exactly.
+        def _bucket_index(text_len: int) -> int:
+            for k, threshold in enumerate(length_buckets):
+                if text_len < threshold:
+                    return k
+            return len(length_buckets)
+
+        bucket_rows: dict[int, list[dict[str, Any]]] = {}
+        for row in eligible_sorted:
+            src_len = len(str(row.get("source", "")))
+            bucket_rows.setdefault(_bucket_index(src_len), []).append(row)
+        n_buckets = len(length_buckets) + 1
+        per_bucket = keep // n_buckets
+        picked_ids: set[str] = set()
+        ranked: list[dict[str, Any]] = []
+        for bk in range(n_buckets):
+            for row in bucket_rows.get(bk, [])[:per_bucket]:
+                rid = str(row["id"])
+                if rid in picked_ids:
+                    continue
+                picked_ids.add(rid)
+                ranked.append(row)
+        # Fill remainder from leftover eligible_sorted order (qe-ascending).
+        if len(ranked) < keep:
+            for row in eligible_sorted:
+                if len(ranked) >= keep:
+                    break
+                rid = str(row["id"])
+                if rid in picked_ids:
+                    continue
+                picked_ids.add(rid)
+                ranked.append(row)
+        # Re-rank by score_s desc for consistent selection_rank semantics.
+        ranked.sort(key=lambda row: (-float(row["score_s"]), str(row["id"])))
+        rule_tag = "default_rule:bucket_equal"
+    else:
+        ranked = eligible_sorted[: min(keep, len(eligible_sorted))]
+        rule_tag = "default_rule:top_fraction"
+
     rank_by_id = {row["id"]: idx for idx, row in enumerate(ranked, start=1)}
 
     selected: list[dict[str, Any]] = []
@@ -2086,7 +2142,7 @@ def _select_fragile(scored_rows: Sequence[Mapping[str, Any]], cfg: Mapping[str, 
             continue
         out = dict(row)
         out["selection_rank"] = rank_by_id[row_id]
-        out["selection_rule"] = "default_rule:top_fraction"
+        out["selection_rule"] = rule_tag
         selected.append(out)
     return selected
 

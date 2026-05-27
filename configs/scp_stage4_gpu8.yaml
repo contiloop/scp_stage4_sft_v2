@@ -296,6 +296,8 @@ qe:
     selection:
       default_rule:
         top_fraction: 0.01
+        mode: bucket_equal
+        length_buckets: [200, 500, 1000, 2000, 5000]
         excluded_datasets:
           - alwaysgood/c4-semantic-deduped
         repetition_filter:
