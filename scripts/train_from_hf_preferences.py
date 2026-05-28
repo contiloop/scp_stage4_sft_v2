@@ -408,6 +408,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--eval-after-each-subset", action="store_true", default=True)
     parser.add_argument("--no-eval-after-each-subset", action="store_false", dest="eval_after_each_subset")
     parser.add_argument(
+        "--eval-force-vllm-subprocess",
+        action="store_true",
+        default=True,
+        help=(
+            "When running eval-ood, force inference.runtime.vllm_inprocess.enabled=false "
+            "so vLLM exits before COMET/xCOMET scoring."
+        ),
+    )
+    parser.add_argument(
+        "--no-eval-force-vllm-subprocess",
+        action="store_false",
+        dest="eval_force_vllm_subprocess",
+    )
+    parser.add_argument(
         "--prune-train-final-orders",
         nargs="*",
         default=sorted(_DEFAULT_PRUNE_ORDERS),
@@ -476,6 +490,7 @@ def main(argv: list[str] | None = None) -> int:
         "total_train_examples": len(examples),
         "prepare_only": bool(args.prepare_only),
         "eval_after_each_subset": bool(args.eval_after_each_subset),
+        "eval_force_vllm_subprocess": bool(args.eval_force_vllm_subprocess),
         "prune_train_final_orders": list(args.prune_train_final_orders),
         "reference_subset_plan": [
             {"subset_idx": int(subset_idx), "count": int(count)}
@@ -545,13 +560,16 @@ def main(argv: list[str] | None = None) -> int:
                     checkpoint_path = checkpoint_state.get("checkpoint_path")
 
                 if args.eval_after_each_subset:
+                    eval_overrides = list(overrides)
+                    if args.eval_force_vllm_subprocess:
+                        eval_overrides.append("inference.runtime.vllm_inprocess.enabled=false")
                     eval_t0 = time.perf_counter()
                     _run_step_subset_phase(
                         command="eval-ood",
                         config_path=args.config,
                         run_id=run_id,
                         subset_idx=subset_idx,
-                        overrides=overrides,
+                        overrides=eval_overrides,
                         require_checkpoint=False,
                     )
                     eval_seconds = time.perf_counter() - eval_t0
