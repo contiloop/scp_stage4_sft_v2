@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import shutil
 import subprocess
@@ -37,6 +38,7 @@ from scp_stage4.schema import validate_artifact_rows
 HF_DATASET_REPO = "alwaysgood/scp-stage4-sft-v2-runs"
 HF_DATASET_REVISION = "main"
 HF_RUNS_ROOT = "artifacts/runs"
+_DEFAULT_PRUNE_ORDERS = {"random", "reverse"}
 
 
 def _utc_now_stamp() -> str:
@@ -117,6 +119,15 @@ def _as_int(value: Any, default: int) -> int:
         return int(value)
     except Exception:
         return default
+
+
+def _get_by_dotpath(cfg: Mapping[str, Any], key: str, default: Any = None) -> Any:
+    cursor: Any = cfg
+    for part in key.split("."):
+        if not isinstance(cursor, Mapping) or part not in cursor:
+            return default
+        cursor = cursor[part]
+    return cursor
 
 
 def _extract_train_examples(
@@ -234,6 +245,61 @@ def _resolve_primary_provider_model(cfg: Mapping[str, Any]) -> tuple[str, str]:
     return provider, model
 
 
+def _checkpoint_keep_last_n(cfg: Mapping[str, Any]) -> int:
+    raw = _get_by_dotpath(cfg, "training.checkpoint.keep_last_n", 1)
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        return 1
+    return max(1, int(raw))
+
+
+def _path_size_bytes(path: Path) -> int:
+    if not path.exists():
+        return 0
+    if path.is_file():
+        return path.stat().st_size
+    total = 0
+    for root, _, files in os.walk(path):
+        root_path = Path(root)
+        for name in files:
+            file_path = root_path / name
+            try:
+                total += file_path.stat().st_size
+            except OSError:
+                continue
+    return total
+
+
+def _prune_old_subset_train_finals(
+    *,
+    run_root: Path,
+    processed_subset_indices: list[int],
+    keep_last_n: int,
+) -> dict[str, Any]:
+    keep_n = max(1, int(keep_last_n))
+    preserve = set(processed_subset_indices[-keep_n:])
+    deleted_subset_indices: list[int] = []
+    deleted_count = 0
+    freed_bytes = 0
+
+    for subset_idx in processed_subset_indices[:-keep_n]:
+        subset_dir = run_root / "subsets" / f"subset_{subset_idx:03d}"
+        train_final_dir = subset_dir / "train_final"
+        if not train_final_dir.exists():
+            continue
+        freed_bytes += _path_size_bytes(train_final_dir)
+        shutil.rmtree(train_final_dir, ignore_errors=True)
+        deleted_count += 1
+        deleted_subset_indices.append(int(subset_idx))
+
+    return {
+        "keep_last_n": keep_n,
+        "preserved_subset_indices": sorted(int(x) for x in preserve),
+        "deleted_subset_indices": deleted_subset_indices,
+        "deleted_count": int(deleted_count),
+        "freed_bytes": int(freed_bytes),
+    }
+
+
 def _build_api_rows(
     *,
     subset_examples: list[dict[str, Any]],
@@ -341,6 +407,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--clean-run-root", action="store_true")
     parser.add_argument("--eval-after-each-subset", action="store_true", default=True)
     parser.add_argument("--no-eval-after-each-subset", action="store_false", dest="eval_after_each_subset")
+    parser.add_argument(
+        "--prune-train-final-orders",
+        nargs="*",
+        default=sorted(_DEFAULT_PRUNE_ORDERS),
+        help="Delete older subset train_final dirs only for these orders.",
+    )
     args, overrides = parser.parse_known_args(argv)
 
     out_dir = (
@@ -404,6 +476,7 @@ def main(argv: list[str] | None = None) -> int:
         "total_train_examples": len(examples),
         "prepare_only": bool(args.prepare_only),
         "eval_after_each_subset": bool(args.eval_after_each_subset),
+        "prune_train_final_orders": list(args.prune_train_final_orders),
         "reference_subset_plan": [
             {"subset_idx": int(subset_idx), "count": int(count)}
             for subset_idx, count in reference_plan
@@ -432,6 +505,8 @@ def main(argv: list[str] | None = None) -> int:
                 )
 
         subset_summaries: list[dict[str, Any]] = []
+        processed_subset_indices: list[int] = []
+        local_keep_last_n = _checkpoint_keep_last_n(cfg)
         for pos, (subset_idx, subset_examples) in enumerate(chunked):
             subset_root = run_root / "subsets" / f"subset_{subset_idx:03d}"
             subset_root.mkdir(parents=True, exist_ok=True)
@@ -492,6 +567,17 @@ def main(argv: list[str] | None = None) -> int:
                         eval_rows = _as_int(ood_summary.get("rows", 0), 0)
                         eval_summary_path = str(summary_path)
 
+                processed_subset_indices.append(int(subset_idx))
+                prune_stats = None
+                if order_name in set(args.prune_train_final_orders):
+                    prune_stats = _prune_old_subset_train_finals(
+                        run_root=run_root,
+                        processed_subset_indices=processed_subset_indices,
+                        keep_last_n=local_keep_last_n,
+                    )
+            else:
+                prune_stats = None
+
             subset_summary = {
                 "subset_idx": int(subset_idx),
                 "rows": int(train_rows),
@@ -503,6 +589,7 @@ def main(argv: list[str] | None = None) -> int:
                 "eval_rows": int(eval_rows),
                 "eval_rows_per_sec": (float(eval_rows) / eval_seconds) if eval_seconds > 0 else None,
                 "eval_summary_path": eval_summary_path,
+                "local_prune": prune_stats,
             }
             subset_summaries.append(subset_summary)
 
