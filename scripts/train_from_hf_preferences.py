@@ -39,6 +39,7 @@ HF_DATASET_REPO = "alwaysgood/scp-stage4-sft-v2-runs"
 HF_DATASET_REVISION = "main"
 HF_RUNS_ROOT = "artifacts/runs"
 _DEFAULT_PRUNE_ORDERS = {"random", "reverse"}
+_DEFAULT_BASE_UPDATE_PER_DEVICE_BATCH_SIZE = 4
 
 
 def _utc_now_stamp() -> str:
@@ -128,6 +129,20 @@ def _get_by_dotpath(cfg: Mapping[str, Any], key: str, default: Any = None) -> An
             return default
         cursor = cursor[part]
     return cursor
+
+
+def _override_key(raw: str) -> str:
+    text = str(raw).strip()
+    if "=" not in text:
+        return text
+    return text.split("=", 1)[0].strip()
+
+
+def _has_override(overrides: Iterable[str], key: str) -> bool:
+    target = str(key).strip()
+    if not target:
+        return False
+    return any(_override_key(raw) == target for raw in overrides)
 
 
 def _extract_train_examples(
@@ -438,7 +453,17 @@ def main(argv: list[str] | None = None) -> int:
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    cfg = compose_config(args.config, overrides=overrides)
+    effective_overrides = list(overrides)
+    if not _has_override(
+        effective_overrides,
+        "training.base_update.batching.per_device_train_batch_size",
+    ):
+        effective_overrides.append(
+            "training.base_update.batching.per_device_train_batch_size="
+            f"{_DEFAULT_BASE_UPDATE_PER_DEVICE_BATCH_SIZE}"
+        )
+
+    cfg = compose_config(args.config, overrides=effective_overrides)
     validate_config(cfg)
 
     run_ids = list(args.run_ids) if args.run_ids else _list_run_ids(
@@ -481,7 +506,7 @@ def main(argv: list[str] | None = None) -> int:
         "repo_id": args.repo_id,
         "revision": args.revision,
         "config": args.config,
-        "config_overrides": overrides,
+        "config_overrides": effective_overrides,
         "orders": args.orders,
         "random_seed": int(args.random_seed),
         "run_ids": run_ids,
@@ -549,7 +574,7 @@ def main(argv: list[str] | None = None) -> int:
                     config_path=args.config,
                     run_id=run_id,
                     subset_idx=subset_idx,
-                    overrides=overrides,
+                    overrides=effective_overrides,
                     require_checkpoint=(pos > 0),
                 )
                 train_seconds = time.perf_counter() - train_t0
@@ -560,7 +585,7 @@ def main(argv: list[str] | None = None) -> int:
                     checkpoint_path = checkpoint_state.get("checkpoint_path")
 
                 if args.eval_after_each_subset:
-                    eval_overrides = list(overrides)
+                    eval_overrides = list(effective_overrides)
                     if args.eval_force_vllm_subprocess:
                         eval_overrides.append("inference.runtime.vllm_inprocess.enabled=false")
                     eval_t0 = time.perf_counter()
